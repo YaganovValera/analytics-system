@@ -1,0 +1,13 @@
+binance:
+  ws_url: "wss://stream.binance.com:9443/ws"
+  symbols:
+    - "btcusdt"
+    - "ethusdt"
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "marketdata.raw"
+
+telemetry:
+  otel_collector: "otel-collector:4317"

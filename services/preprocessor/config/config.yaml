@@ -1,0 +1,18 @@
+# preprocessor/config/config.yaml
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  group_id: "preprocessor-group"
+  topic: "marketdata.raw"
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  # по сколько секунд хранить сырые данные (TTL)
+  ttl_seconds: 3600
+
+telemetry:
+  # endpoint вашего OTLP-коллектора
+  otel_collector: "otel-collector:4317"

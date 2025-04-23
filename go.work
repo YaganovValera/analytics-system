@@ -1,0 +1,11 @@
+go 1.22.0
+
+use (
+  ./common
+  ./proto
+  ./services/market-data-collector
+  ./services/preprocessor
+  ./services/auth
+  ./services/api-gateway
+  ./services/analytics-api
+)

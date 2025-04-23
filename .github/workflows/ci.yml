@@ -1,0 +1,38 @@
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Install buf (инструмент для lint proto)  
+        run: |
+          curl -sSLf https://github.com/bufbuild/buf/releases/download/v1.24.0/buf-Linux-x86_64 \
+            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+
+      - name: Install protoc-gen-go plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Generate and lint protobufs
+        run: make proto-lint proto-gen
+
+      - name: Build services
+        run: make build
+
+      - name: Run tests
+        run: make test

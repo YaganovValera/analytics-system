@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package analytics.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1;v1";
+
+message Empty {}
+
+message StreamError {
+  string code    = 1;  // e.g. "INTERNAL", "UNAUTHORIZED"
+  string message = 2;
+}
