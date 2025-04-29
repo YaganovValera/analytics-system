@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	pflag "github.com/spf13/pflag"
+
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/app"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/config"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
@@ -17,7 +19,7 @@ import (
 func main() {
 	// Флаг --config
 	configPath := flag.String("config", "config/config.yaml", "path to config file")
-	flag.Parse()
+	pflag.Parse()
 
 	// 1. Загрузить конфиг
 	cfg, err := config.LoadConfig(*configPath)

@@ -1,4 +1,4 @@
-// internal/telemetry/otel.go
+// pkg/telemetry/otel.go
 package telemetry
 
 import (

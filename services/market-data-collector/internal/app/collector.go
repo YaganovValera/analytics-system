@@ -12,8 +12,6 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
-	pkgtelemetry "github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/telemetry"
-
 	"golang.org/x/sync/errgroup"
 )
 
@@ -28,21 +26,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	// 2. Регистрация метрик
 	metrics.Register()
 
-	// 3. Инициализация TracerProvider
-	tracerShutdown, err := pkgtelemetry.InitTracer(
-		ctx,
-		cfg.Telemetry.OTLPEndpoint,
-		cfg.ServiceName,
-		cfg.ServiceVersion,
-		cfg.Telemetry.Insecure,
-		log,
-	)
-	if err != nil {
-		return fmt.Errorf("telemetry init: %w", err)
-	}
-	defer tracerShutdown(ctx)
-
-	// 4. Создание HTTP-сервера
+	// 3. Создание HTTP-сервера
 	readiness := func() error { return nil }
 	httpSrv := httpserver.NewServer(
 		fmt.Sprintf(":%d", cfg.HTTP.HealthPort),
@@ -50,7 +34,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		log,
 	)
 
-	// 5. WebSocket-коннектор
+	// 4. WebSocket-коннектор
 	wsConn, err := binance.NewConnector(binance.Config{
 		WSURL:         cfg.Binance.WSURL,
 		Symbols:       cfg.Binance.Symbols,
@@ -66,7 +50,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("ws stream: %w", err)
 	}
 
-	// 6. Kafka-продьюсер
+	// 5 Kafka-продьюсер
 	producer, err := kafka.NewProducer(ctx, kafka.Config{
 		Brokers:        cfg.Kafka.Brokers,
 		RequiredAcks:   cfg.Kafka.Acks,
@@ -81,14 +65,14 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer producer.Close()
 
-	// 7. Processor
+	// 6. Processor
 	proc := processor.New(
 		producer,
 		processor.Topics{RawTopic: cfg.Kafka.Topics.Raw, OrderBookTopic: cfg.Kafka.Topics.OrderBook},
 		log,
 	)
 
-	// 8. Errgroup для HTTP и pipeline
+	// 7. Errgroup для HTTP и pipeline
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -111,7 +95,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		}
 	})
 
-	// 9. Ожидание завершения
+	// 8. Ожидание завершения
 	err = g.Wait()
 	log.Sync()
 	return err

@@ -1,37 +1,47 @@
-# 1. Stage: сборка бинарника
+# ========== BUILD STAGE ==========
 FROM golang:1.23-alpine AS builder
-RUN apk add --no-cache ca-certificates git
+
+# Установка зависимостей
+RUN apk add --no-cache git ca-certificates
+
+# Рабочая директория для сборки
+WORKDIR /app
+
+# Копируем go.mod, go.sum, и go.work если есть
+COPY go.mod go.sum ./
+# Качаем зависимости
+RUN go mod download
+
+# Копируем весь код сервиса (market-data-collector)
+COPY . .
+
+# Собираем бинарник
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o market-data-collector ./cmd/collector
+
+# ========== RUNTIME STAGE ==========
+FROM alpine:3.18
+
+# Установка сертификатов
+RUN apk add --no-cache ca-certificates
+
+# Пользователь для запуска приложения
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
-# Сначала копируем go.work, чтобы Go понял monorepo
-COPY go.work go.work.sum ./
 
-# Копируем модули из корня и сам сервис
-COPY common/       common/
-COPY proto/        proto/
-COPY services/market-data-collector/go.mod  services/market-data-collector/go.mod
-COPY services/market-data-collector/go.sum  services/market-data-collector/go.sum
-COPY services/market-data-collector/         services/market-data-collector/
+# Копируем бинарник из builder stage
+COPY --from=builder /app/market-data-collector .
 
-# Перейдём в каталог сервиса
-WORKDIR /app/services/market-data-collector
-# Обновим зависимости
-RUN go work sync
-RUN go mod tidy
+# Копируем конфигурацию (если нужно локально поднять)
+COPY config/config.yaml ./config/config.yaml
 
-# Соберём статический бинарь
-RUN CGO_ENABLED=0 GOOS=linux go build -o collector ./cmd/collector
+# Меняем владельца файлов
+RUN chown -R appuser:appgroup /app
 
-# 2. Stage: минимальный образ
-FROM scratch
-# Копируем сертификаты
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-# Копируем бинарник
-COPY --from=builder /app/services/market-data-collector/collector /collector
+USER appuser
 
-# Готовимся к монтированию конфигурации
-VOLUME ["/config"]
+# Экспонируем порт для healthcheck
 EXPOSE 8080
-USER 65532:65532
 
-ENTRYPOINT ["/collector", "--config", "/config/config.yaml"]
+# Запуск
+ENTRYPOINT ["./market-data-collector", "--config", "config/config.yaml"]

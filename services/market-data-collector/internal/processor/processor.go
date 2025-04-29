@@ -142,10 +142,14 @@ func (p *Processor) handleDepth(ctx context.Context, data []byte, start time.Tim
 	for _, lvl := range evt.Bids {
 		price, err := strconv.ParseFloat(lvl[0], 64)
 		if err != nil {
+			p.log.Sugar().Warnw("processor: invalid bid price format", "price", lvl[0], "error", err)
+			metrics.PublishErrors.Inc()
 			continue
 		}
 		qty, err := strconv.ParseFloat(lvl[1], 64)
 		if err != nil {
+			p.log.Sugar().Warnw("processor: invalid bid quantity format", "quantity", lvl[1], "error", err)
+			metrics.PublishErrors.Inc()
 			continue
 		}
 		bids = append(bids, &marketdatapb.OrderBookLevel{Price: price, Quantity: qty})
@@ -154,10 +158,14 @@ func (p *Processor) handleDepth(ctx context.Context, data []byte, start time.Tim
 	for _, lvl := range evt.Asks {
 		price, err := strconv.ParseFloat(lvl[0], 64)
 		if err != nil {
+			p.log.Sugar().Warnw("processor: invalid ask price format", "price", lvl[0], "error", err)
+			metrics.PublishErrors.Inc()
 			continue
 		}
 		qty, err := strconv.ParseFloat(lvl[1], 64)
 		if err != nil {
+			p.log.Sugar().Warnw("processor: invalid ask quantity format", "quantity", lvl[1], "error", err)
+			metrics.PublishErrors.Inc()
 			continue
 		}
 		asks = append(asks, &marketdatapb.OrderBookLevel{Price: price, Quantity: qty})
