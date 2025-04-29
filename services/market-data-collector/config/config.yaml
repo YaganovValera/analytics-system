@@ -1,13 +1,43 @@
+service_name: "market-data-collector"
+service_version: "v1.0.0"
+
 binance:
   ws_url: "wss://stream.binance.com:9443/ws"
   symbols:
-    - "btcusdt"
-    - "ethusdt"
+    - "btcusdt@trade"
+    - "ethusdt@depth"
+  read_timeout: "30s"
+  backoff:
+    initial_interval: "1s"
+    max_interval: "30s"
+    max_elapsed_time: "5m"
 
 kafka:
   brokers:
     - "localhost:9092"
-  topic: "marketdata.raw"
+  topics:
+    raw: "marketdata.raw"
+    orderbook: "marketdata.orderbook"
+  timeout: "15s"
+  acks: "all"
+  compression: "none"
+  flush_frequency: "0s"
+  flush_messages: 0
+  backoff:
+    initial_interval: "1s"
+    max_interval: "30s"
+    max_elapsed_time: "5m"
 
 telemetry:
-  otel_collector: "otel-collector:4317"
+  otel_endpoint: "otel-collector:4317"
+  insecure: false
+
+logging:
+  level: "info"
+  dev_mode: false
+
+buffer:
+  size: 10000
+
+http:
+  health_port: 8080

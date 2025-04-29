@@ -12,11 +12,10 @@ GO_SERVICES  := market-data-collector preprocessor auth api-gateway analytics-ap
 .PHONY: proto-gen
 proto-gen:
 	protoc \
-	  --proto_path=$(PROTO_DIR) \
-	  --go_out=./$(PROTO_DIR)/generate --go_opt=paths=source_relative \
-	  --go-grpc_out=./$(PROTO_DIR)/generate --go-grpc_opt=paths=source_relative \
-	  $(PROTO_FILES)
-
+		--proto_path=. \
+		--go_out=module=github.com/YaganovValera/analytics-system/proto/v1/generate,paths=import:./$(PROTO_DIR)/generate \
+		--go-grpc_out=module=github.com/YaganovValera/analytics-system/proto/v1/generate,paths=import:./$(PROTO_DIR)/generate \
+		$(PROTO_FILES)
 # --------------------------------------------------
 # Сборка всех сервисов (зависит от proto-gen)
 .PHONY: build

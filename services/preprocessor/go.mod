@@ -1,6 +1,6 @@
 module github.com/YaganovValera/analytics-system/preprocessor
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/IBM/sarama v1.45.1
