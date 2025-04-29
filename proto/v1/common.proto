@@ -1,0 +1,49 @@
+// proto/v1/common.proto
+syntax = "proto3";
+
+package market.common;
+
+
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1/generate/common;commonpb";
+
+// Коды ошибок для потоков.
+enum ErrorCode {
+  reserved 100 to 199;
+
+  // OK.
+  ERROR_CODE_OK               = 0;
+  // Сервис недоступен.
+  ERROR_CODE_UNAVAILABLE      = 1;
+  // Внутренняя ошибка.
+  ERROR_CODE_INTERNAL         = 2;
+  // Таймаут.
+  ERROR_CODE_TIMEOUT          = 3;
+  // Неверный аргумент.
+  ERROR_CODE_INVALID_ARGUMENT = 4;
+  // Незалогинен/неавторизован.
+  ERROR_CODE_UNAUTHORIZED     = 5;
+}
+
+// Ошибка в потоке.
+message StreamError {
+  reserved 100 to 199;
+
+  // Код ошибки.
+  ErrorCode code    = 1;
+  // Описание ошибки.
+  string    message = 2;
+}
+
+// Интервалы агрегации для исторических запросов.
+enum AggregationInterval {
+  reserved 100 to 199;
+
+  AGG_INTERVAL_UNSPECIFIED = 0;
+  AGG_INTERVAL_1_MINUTE    = 1;
+  AGG_INTERVAL_5_MINUTES   = 2;
+  AGG_INTERVAL_15_MINUTES  = 3;
+  AGG_INTERVAL_1_HOUR      = 4;
+  AGG_INTERVAL_4_HOURS     = 5;
+  AGG_INTERVAL_1_DAY       = 6;
+}

@@ -1,0 +1,64 @@
+// proto/v1/analytics.proto
+syntax = "proto3";
+
+package market.analytics;
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1/generate/analytics;analyticspb";
+
+import "google/protobuf/timestamp.proto";
+import "proto/v1/common.proto";
+
+// Одна свеча OHLCV
+message Candle {
+  // Резервируем номера удалённых/будущих полей
+  reserved 100 to 199;
+
+  // Время открытия свечи.
+  google.protobuf.Timestamp open_time  = 1;
+  // Время закрытия свечи.
+  google.protobuf.Timestamp close_time = 2;
+  // Торговый символ, например \"BTCUSDT\".
+  string symbol                     = 3;
+  // Цена открытия.
+  double open                      = 4;
+  // Максимальная цена.
+  double high                      = 5;
+  // Минимальная цена.
+  double low                       = 6;
+  // Цена закрытия.
+  double close                     = 7;
+  // Объём торгов.
+  double volume                    = 8;
+}
+
+// Запрос исторических свечей
+message GetCandlesRequest {
+  reserved 100 to 199;
+
+  // Торговый символ.
+  string symbol                     = 1;
+  // Начало периода.
+  google.protobuf.Timestamp start   = 2;
+  // Конец периода.
+  google.protobuf.Timestamp end     = 3;
+  // Интервал агрегации (1m, 5m, …).
+  market.common.AggregationInterval interval = 4;
+}
+
+// Элемент потока исторических свечей.
+message CandleEvent {
+  reserved 100 to 199;
+
+  oneof payload {
+    // Данные свечи.
+    Candle           candle = 1;
+    // Ошибка потока.
+    market.common.StreamError error  = 2;
+  }
+}
+
+// Сервис аналитики свечей.
+service AnalyticsService {
+  // Поток исторических свечей по символу и интервалу.
+  rpc GetCandles(GetCandlesRequest) returns (stream CandleEvent);
+}
