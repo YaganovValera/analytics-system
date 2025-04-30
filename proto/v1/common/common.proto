@@ -1,0 +1,39 @@
+// proto/v1/common.proto
+syntax = "proto3";
+
+package market.common;
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1/common;commonpb";
+
+// ErrorCode defines standard error codes for streaming operations.
+enum ErrorCode {
+  // No error.
+  OK = 0;
+  // Service unavailable.
+  UNAVAILABLE = 1;
+  // Internal server error.
+  INTERNAL = 2;
+  // Operation timed out.
+  TIMEOUT = 3;
+  // Invalid argument provided.
+  INVALID_ARGUMENT = 4;
+  // Unauthorized or unauthenticated.
+  UNAUTHORIZED = 5;
+}
+
+// StreamError represents an error in a data stream.
+message StreamError {
+  ErrorCode code    = 1;
+  string    message = 2;
+}
+
+// AggregationInterval specifies intervals for historical data aggregation.
+enum AggregationInterval {
+  AGG_INTERVAL_UNSPECIFIED = 0;
+  AGG_INTERVAL_1_MINUTE    = 1;
+  AGG_INTERVAL_5_MINUTES   = 2;
+  AGG_INTERVAL_15_MINUTES  = 3;
+  AGG_INTERVAL_1_HOUR      = 4;
+  AGG_INTERVAL_4_HOURS     = 5;
+  AGG_INTERVAL_1_DAY       = 6;
+}

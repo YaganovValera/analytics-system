@@ -1,0 +1,57 @@
+// proto/v1/marketdata.proto
+syntax = "proto3";
+
+package market.marketdata;
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1/marketdata;marketdatapb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "common/common.proto";
+
+// MarketData represents a raw trade event.
+message MarketData {
+  google.protobuf.Timestamp timestamp = 1;
+  string symbol                       = 2;
+  double price                        = 3;
+  double bid_price                    = 4;
+  double ask_price                    = 5;
+  double volume                       = 6;
+  string trade_id                     = 7;
+}
+
+// OrderBookLevel is one price level in the order book.
+message OrderBookLevel {
+  double price    = 1;
+  double quantity = 2;
+}
+
+// OrderBookSnapshot is a snapshot of top-N levels.
+message OrderBookSnapshot {
+  google.protobuf.Timestamp timestamp = 1;
+  string symbol                       = 2;
+  repeated OrderBookLevel bids       = 3;
+  repeated OrderBookLevel asks       = 4;
+}
+
+// MarketDataEvent wraps a MarketData or a stream error.
+message MarketDataEvent {
+  oneof payload {
+    MarketData                 data         = 1;
+    market.common.StreamError  stream_error = 2;
+  }
+}
+
+// OrderBookEvent wraps an OrderBookSnapshot or a stream error.
+message OrderBookEvent {
+  oneof payload {
+    OrderBookSnapshot          data         = 1;
+    market.common.StreamError  stream_error = 2;
+  }
+}
+
+// MarketDataService streams raw market data and order book.
+service MarketDataService {
+  rpc StreamMarketData(google.protobuf.Empty) returns (stream MarketDataEvent);
+  rpc StreamOrderBook(google.protobuf.Empty) returns (stream OrderBookEvent);
+}

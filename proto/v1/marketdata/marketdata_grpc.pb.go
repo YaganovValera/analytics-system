@@ -4,7 +4,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.21.12
-// source: proto/v1/marketdata.proto
+// source: marketdata/marketdata.proto
 
 package marketdatapb
 
@@ -30,11 +30,9 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Сервис «сырых» данных рынка.
+// MarketDataService streams raw market data and order book.
 type MarketDataServiceClient interface {
-	// Поток рыночных данных (тикеры).
 	StreamMarketData(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MarketDataEvent], error)
-	// Поток снимков книги заявок.
 	StreamOrderBook(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OrderBookEvent], error)
 }
 
@@ -88,11 +86,9 @@ type MarketDataService_StreamOrderBookClient = grpc.ServerStreamingClient[OrderB
 // All implementations must embed UnimplementedMarketDataServiceServer
 // for forward compatibility.
 //
-// Сервис «сырых» данных рынка.
+// MarketDataService streams raw market data and order book.
 type MarketDataServiceServer interface {
-	// Поток рыночных данных (тикеры).
 	StreamMarketData(*emptypb.Empty, grpc.ServerStreamingServer[MarketDataEvent]) error
-	// Поток снимков книги заявок.
 	StreamOrderBook(*emptypb.Empty, grpc.ServerStreamingServer[OrderBookEvent]) error
 	mustEmbedUnimplementedMarketDataServiceServer()
 }
@@ -172,5 +168,5 @@ var MarketDataService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "proto/v1/marketdata.proto",
+	Metadata: "marketdata/marketdata.proto",
 }

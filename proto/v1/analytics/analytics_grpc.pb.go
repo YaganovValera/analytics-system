@@ -4,7 +4,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.21.12
-// source: proto/v1/analytics.proto
+// source: analytics/analytics.proto
 
 package analyticspb
 
@@ -28,9 +28,9 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Сервис аналитики свечей.
+// AnalyticsService provides historical candle data.
 type AnalyticsServiceClient interface {
-	// Поток исторических свечей по символу и интервалу.
+	// Streams candles between start and end at the given interval.
 	GetCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CandleEvent], error)
 }
 
@@ -65,9 +65,9 @@ type AnalyticsService_GetCandlesClient = grpc.ServerStreamingClient[CandleEvent]
 // All implementations must embed UnimplementedAnalyticsServiceServer
 // for forward compatibility.
 //
-// Сервис аналитики свечей.
+// AnalyticsService provides historical candle data.
 type AnalyticsServiceServer interface {
-	// Поток исторических свечей по символу и интервалу.
+	// Streams candles between start and end at the given interval.
 	GetCandles(*GetCandlesRequest, grpc.ServerStreamingServer[CandleEvent]) error
 	mustEmbedUnimplementedAnalyticsServiceServer()
 }
@@ -128,5 +128,5 @@ var AnalyticsService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "proto/v1/analytics.proto",
+	Metadata: "analytics/analytics.proto",
 }

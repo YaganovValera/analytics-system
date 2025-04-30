@@ -1,0 +1,46 @@
+// proto/v1/analytics.proto
+syntax = "proto3";
+
+package market.analytics;
+
+option go_package = "github.com/YaganovValera/analytics-system/proto/v1/analytics;analyticspb";
+
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+
+// Candle represents a single OHLCV data point.
+message Candle {
+  // Time when the candle opens.
+  google.protobuf.Timestamp open_time  = 1;
+  // Time when the candle closes.
+  google.protobuf.Timestamp close_time = 2;
+  // Trading symbol, e.g., "BTCUSDT".
+  string symbol                        = 3;
+  double open                          = 4;
+  double high                          = 5;
+  double low                           = 6;
+  double close                         = 7;
+  double volume                        = 8;
+}
+
+// GetCandlesRequest requests historical candles for a symbol.
+message GetCandlesRequest {
+  string symbol                             = 1;
+  google.protobuf.Timestamp start           = 2;
+  google.protobuf.Timestamp end             = 3;
+  market.common.AggregationInterval interval = 4;
+}
+
+// CandleEvent is a streaming wrapper for Candle or an error.
+message CandleEvent {
+  oneof payload {
+    Candle                   candle       = 1;
+    market.common.StreamError stream_error = 2;
+  }
+}
+
+// AnalyticsService provides historical candle data.
+service AnalyticsService {
+  // Streams candles between start and end at the given interval.
+  rpc GetCandles(GetCandlesRequest) returns (stream CandleEvent);
+}
