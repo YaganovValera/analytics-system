@@ -1,81 +1,111 @@
-// pkg/binance/ws.go
 package binance
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/backoff"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.uber.org/zap"
 )
 
-// RawMessage несёт оригинальные JSON-данные и их тип (поле "e").
+var (
+	// Prometheus metrics
+	wsConnects = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "connects_total",
+		Help: "Total WebSocket connection attempts",
+	})
+	wsConnectErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "connect_errors_total",
+		Help: "Total WebSocket connection errors",
+	})
+	wsReconnects = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "reconnects_total",
+		Help: "Total WebSocket reconnections",
+	})
+	wsMessages = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "messages_received_total",
+		Help: "Total messages received from WebSocket",
+	})
+	wsSubscribeErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "subscribe_errors_total",
+		Help: "Total subscription errors",
+	})
+	wsReadErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "read_errors_total",
+		Help: "Total read errors from WebSocket",
+	})
+	wsPingErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "ping_errors_total",
+		Help: "Total ping failures",
+	})
+	wsBufferDrops = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "buffer_drops_total",
+		Help: "Number of messages dropped because buffer was full",
+	})
+)
+
+var tracer = otel.Tracer("binance-ws")
+
+// RawMessage carries unmodified JSON payload and its event type.
 type RawMessage struct {
-	Data []byte
-	Type string
+	Data []byte // JSON bytes
+	Type string // event type, e.g. "trade" or "depthUpdate"
 }
 
-// Config задаёт параметры подключения к Binance WebSocket.
+// Config defines WebSocket connection settings.
 type Config struct {
-	WSURL         string         // адрес WebSocket, например "wss://stream.binance.com:9443/ws"
-	Symbols       []string       // стримы, напр. ["btcusdt@trade","ethusdt@depth"]
-	BufferSize    int            // размер буфера для канала RawMessage
-	ReadTimeout   time.Duration  // ReadDeadline, например 30s
-	BackoffConfig backoff.Config // настройки экспоненциального бэкоффа
+	URL              string         // e.g. "wss://stream.binance.com:9443/ws"
+	Streams          []string       // e.g. ["btcusdt@trade","btcusdt@depth"]
+	BufferSize       int            // channel buffer size
+	ReadTimeout      time.Duration  // pong wait timeout
+	SubscribeTimeout time.Duration  // write deadline for SUBSCRIBE
+	BackoffConfig    backoff.Config // retry settings
 }
 
-// validate проверяет и заполняет default-значения.
-func (c *Config) validate() error {
-	var errs []string
-
-	if c.WSURL == "" {
-		errs = append(errs, "WSURL is required")
-	}
-	if len(c.Symbols) == 0 {
-		errs = append(errs, "at least one Symbol is required")
-	}
+func (c *Config) applyDefaults() {
 	if c.BufferSize <= 0 {
-		c.BufferSize = 100 // reasonable default
+		c.BufferSize = 100
 	}
 	if c.ReadTimeout <= 0 {
 		c.ReadTimeout = 30 * time.Second
 	}
-	if c.BackoffConfig.InitialInterval <= 0 {
-		c.BackoffConfig.InitialInterval = 1 * time.Second
+	if c.SubscribeTimeout <= 0 {
+		c.SubscribeTimeout = 5 * time.Second
 	}
-	if c.BackoffConfig.RandomizationFactor <= 0 {
-		c.BackoffConfig.RandomizationFactor = 0.5
-	}
-	if c.BackoffConfig.Multiplier <= 0 {
-		c.BackoffConfig.Multiplier = 2.0
-	}
-	if c.BackoffConfig.MaxInterval <= 0 {
-		c.BackoffConfig.MaxInterval = 30 * time.Second
-	}
-	// MaxElapsedTime == 0 means no overall timeout
+}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("invalid Config: %s", strings.Join(errs, "; "))
+func (c *Config) validate() error {
+	if c.URL == "" {
+		return fmt.Errorf("binance-ws: URL is required")
+	}
+	if len(c.Streams) == 0 {
+		return fmt.Errorf("binance-ws: at least one stream is required")
 	}
 	return nil
 }
 
-// Connector управляет соединением к Binance WS с авто-reconnect.
+// Connector manages a Binance WebSocket connection with auto-reconnect.
 type Connector struct {
 	cfg         Config
 	log         *logger.Logger
-	subscribeID uint64 // для уникальных подписок
+	subscribeID uint64
 }
 
-// NewConnector создаёт Connector.
-// Логгер именуется как "binance-ws" для удобного фильтра в логах.
+// NewConnector constructs a Connector, applies defaults and validates.
 func NewConnector(cfg Config, log *logger.Logger) (*Connector, error) {
+	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -85,8 +115,7 @@ func NewConnector(cfg Config, log *logger.Logger) (*Connector, error) {
 	}, nil
 }
 
-// Stream запускает подпроцесс чтения и возвращает канал RawMessage.
-// Закрытие канала происходит при отмене ctx.
+// Stream begins listening to the WebSocket and sends RawMessages to the returned channel.
 func (c *Connector) Stream(ctx context.Context) (<-chan RawMessage, error) {
 	ch := make(chan RawMessage, c.cfg.BufferSize)
 	go c.run(ctx, ch)
@@ -97,95 +126,147 @@ func (c *Connector) run(ctx context.Context, ch chan<- RawMessage) {
 	defer close(ch)
 
 	for {
-		// 1) Проверка отмены контекста
-		select {
-		case <-ctx.Done():
-			c.log.Sugar().Infow("ws: context cancelled, exiting")
+		if err := ctx.Err(); err != nil {
+			c.log.Info("ws: context cancelled, stopping")
 			return
-		default:
 		}
 
-		// 2) Подключаемся с бэкоффом
-		var conn *websocket.Conn
-		err := backoff.WithBackoff(ctx, c.cfg.BackoffConfig, c.log, func(ctxTry context.Context) error {
-			var dialErr error
-			conn, _, dialErr = websocket.DefaultDialer.DialContext(ctxTry, c.cfg.WSURL, nil)
-			return dialErr
-		})
+		// --- Connect with retry ---
+		wsConnects.Inc()
+		ctxConn, spanConn := tracer.Start(ctx, "WS.Connect",
+			trace.WithAttributes(attribute.String("url", c.cfg.URL)))
+		conn, err := c.connect(ctxConn)
+		spanConn.End()
+
 		if err != nil {
-			c.log.Sugar().Errorw("ws: failed to connect after retries", "err", err)
+			wsConnectErrors.Inc()
+			wsReconnects.Inc()
+			c.log.Error("ws: connect failed", zap.Error(err))
 			continue
 		}
-		c.log.Sugar().Infow("ws: connected", "url", c.cfg.WSURL)
+		c.log.Info("ws: connected", zap.String("url", c.cfg.URL))
 
-		// 3) Контекст для ping-горутины
-		connCtx, cancelPing := context.WithCancel(ctx)
+		// --- Start pinging ---
+		cancelPing := c.startPinger(ctx, conn)
 
-		// 4) Настройка read-пинг механизма
-		conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
-		conn.SetPongHandler(func(string) error {
-			return conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
-		})
+		// --- Subscribe ---
+		ctxSub, spanSub := tracer.Start(ctx, "WS.Subscribe")
+		if err := c.subscribe(ctxSub, conn); err != nil {
+			wsSubscribeErrors.Inc()
+			spanSub.RecordError(err)
+			spanSub.End()
+			cancelPing()
+			conn.Close()
+			continue
+		}
+		spanSub.End()
 
-		// 5) Запуск ping-горутины с WriteDeadline и логированием ошибок
-		go func(cConn *websocket.Conn) {
-			ticker := time.NewTicker(c.cfg.ReadTimeout / 3)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-connCtx.Done():
-					return
-				case <-ticker.C:
-					// перед пингом задаём WriteDeadline
-					_ = cConn.SetWriteDeadline(time.Now().Add(time.Second))
-					if err := cConn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
-						c.log.Sugar().Warnw("ws: ping failed", "err", err)
-					}
+		// --- Read loop ---
+		ctxRead, spanRead := tracer.Start(ctx, "WS.ReadLoop")
+		if err := c.readLoop(ctxRead, conn, ch); err != nil {
+			wsReadErrors.Inc()
+			spanRead.RecordError(err)
+			c.log.Warn("ws: read loop error, reconnecting", zap.Error(err))
+		}
+		spanRead.End()
+
+		cancelPing()
+		conn.Close()
+		wsReconnects.Inc()
+	}
+}
+
+func (c *Connector) connect(ctx context.Context) (*websocket.Conn, error) {
+	var conn *websocket.Conn
+	op := func(ctx context.Context) error {
+		var err error
+		conn, _, err = websocket.DefaultDialer.DialContext(ctx, c.cfg.URL, nil)
+		return err
+	}
+	if err := backoff.Execute(ctx, c.cfg.BackoffConfig, c.log, op); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+func (c *Connector) startPinger(ctx context.Context, conn *websocket.Conn) context.CancelFunc {
+	conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
+	})
+
+	pingCtx, cancel := context.WithCancel(ctx)
+	ticker := time.NewTicker(c.cfg.ReadTimeout / 3)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-ticker.C:
+				conn.SetWriteDeadline(time.Now().Add(time.Second))
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
+					wsPingErrors.Inc()
+					c.log.Warn("ws: ping failed", zap.Error(err))
 				}
 			}
-		}(conn)
-
-		// 6) Подписываемся на стримы с уникальным id
-		id := atomic.AddUint64(&c.subscribeID, 1)
-		req := map[string]interface{}{
-			"method": "SUBSCRIBE",
-			"params": c.cfg.Symbols,
-			"id":     id,
 		}
-		// WriteDeadline перед подпиской
-		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if err := conn.WriteJSON(req); err != nil {
-			c.log.Sugar().Errorw("ws: subscribe failed", "err", err, "id", id)
-			conn.Close()
-			cancelPing()
+	}()
+
+	return cancel
+}
+
+func (c *Connector) subscribe(ctx context.Context, conn *websocket.Conn) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	id := atomic.AddUint64(&c.subscribeID, 1)
+	req := map[string]interface{}{
+		"method": "SUBSCRIBE",
+		"params": c.cfg.Streams,
+		"id":     id,
+	}
+	conn.SetWriteDeadline(time.Now().Add(c.cfg.SubscribeTimeout))
+	return conn.WriteJSON(req)
+}
+
+func (c *Connector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<- RawMessage) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		_, bytes, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		wsMessages.Inc()
+
+		var env struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(bytes, &env); err != nil {
+			c.log.Warn("ws: invalid envelope", zap.Error(err))
 			continue
 		}
 
-		// 7) Чтение сообщений
-		for {
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				c.log.Sugar().Warnw("ws: read error, reconnecting", "err", err)
-				conn.Close()
-				cancelPing()
-				break
-			}
+		msgType := "unknown"
+		var meta struct {
+			Event string `json:"e"`
+		}
+		if err := json.Unmarshal(env.Data, &meta); err == nil && meta.Event != "" {
+			msgType = meta.Event
+		}
 
-			// Классифицируем событие по полю "e"
-			msgType := "unknown"
-			var meta struct {
-				Event string `json:"e"`
-			}
-			if uErr := json.Unmarshal(data, &meta); uErr == nil && meta.Event != "" {
-				msgType = meta.Event
-			}
-
-			// Отправляем, если есть место в буфере
-			select {
-			case ch <- RawMessage{Data: data, Type: msgType}:
-			default:
-				c.log.Sugar().Warnw("ws: buffer full, dropping message", "type", msgType)
-			}
+		select {
+		case ch <- RawMessage{Data: env.Data, Type: msgType}:
+		default:
+			// **Reintroduced** BufferDrops to track dropped messages
+			wsBufferDrops.Inc()
+			c.log.Warn("ws: buffer full, dropping message", zap.String("type", msgType))
 		}
 	}
 }

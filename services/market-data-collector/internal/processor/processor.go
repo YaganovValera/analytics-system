@@ -1,37 +1,42 @@
-// services/market-data-collector/internal/processor/processor.go
 package processor
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
-
-	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/generate/marketdata"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
+	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
+	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+	"go.uber.org/zap"
 
+	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/marketdata"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Topics holds Kafka topic names for publishing.
+var tracer = otel.Tracer("processor")
+
+// Topics holds Kafka topic names.
 type Topics struct {
 	RawTopic       string
 	OrderBookTopic string
 }
 
-// Processor разбирает RawMessage и публикует в Kafka.
+// Processor parses raw Binance messages and publishes protobufs to Kafka.
 type Processor struct {
 	producer *kafka.Producer
 	topics   Topics
 	log      *logger.Logger
 }
 
-// New создает новый Processor.
+// New constructs a Processor with its dependencies.
 func New(producer *kafka.Producer, topics Topics, log *logger.Logger) *Processor {
 	return &Processor{
 		producer: producer,
@@ -40,157 +45,189 @@ func New(producer *kafka.Producer, topics Topics, log *logger.Logger) *Processor
 	}
 }
 
-// Process обрабатывает одно сообщение raw: парсит JSON, конвертирует в Protobuf и публикует.
-// Возвращает ошибку, если публикация не удалась.
+// Process routes the incoming RawMessage to the appropriate handler.
 func (p *Processor) Process(ctx context.Context, raw binance.RawMessage) error {
-	// Увеличиваем общий счётчик событий
+	ctx, span := tracer.Start(ctx, "Process",
+		trace.WithAttributes(attribute.String("event.type", raw.Type)))
+	defer span.End()
+
 	metrics.EventsTotal.Inc()
 	start := time.Now()
 
 	switch raw.Type {
 	case "trade":
 		return p.handleTrade(ctx, raw.Data, start)
-
 	case "depthUpdate":
 		return p.handleDepth(ctx, raw.Data, start)
-
 	default:
-		p.log.Sugar().Warnw("processor: unsupported event type, skipping", "type", raw.Type)
+		metrics.UnsupportedEvents.Inc()
+		p.log.WithContext(ctx).Debug("unsupported event, skipping",
+			zap.String("type", raw.Type))
 		return nil
 	}
 }
 
 func (p *Processor) handleTrade(ctx context.Context, data []byte, start time.Time) error {
-	// Структура JSON-ответа Binance для trade
-	var evt struct {
-		EventType string `json:"e"`
-		EventTime int64  `json:"E"`
-		Symbol    string `json:"s"`
-		TradeTime int64  `json:"T"`
-		Price     string `json:"p"`
-		Quantity  string `json:"q"`
-		TradeID   int64  `json:"t"`
-	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		p.log.Sugar().Errorw("processor: failed unmarshal trade", "error", err)
-		metrics.PublishErrors.Inc()
-		return nil // пропускаем эту запись
+	ctx, span := tracer.Start(ctx, "HandleTrade")
+	defer span.End()
+
+	evt, err := parseTrade(data)
+	if err != nil {
+		metrics.ParseErrors.Inc()
+		p.log.WithContext(ctx).Error("parse trade failed", zap.Error(err))
+		span.RecordError(err)
+		return nil // skip invalid message
 	}
 
-	// Парсим строки в float64
-	price, err := strconv.ParseFloat(evt.Price, 64)
-	if err != nil {
-		p.log.Sugar().Errorw("processor: invalid price format", "price", evt.Price, "error", err)
-		metrics.PublishErrors.Inc()
-		return nil
-	}
-	qty, err := strconv.ParseFloat(evt.Quantity, 64)
-	if err != nil {
-		p.log.Sugar().Errorw("processor: invalid quantity format", "quantity", evt.Quantity, "error", err)
-		metrics.PublishErrors.Inc()
-		return nil
-	}
-
-	// Формируем Protobuf-сообщение
 	msg := &marketdatapb.MarketData{
-		Timestamp: timestamppb.New(time.Unix(evt.EventTime/1000, (evt.EventTime%1000)*1e6)),
+		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
 		Symbol:    evt.Symbol,
-		Price:     price,
-		BidPrice:  0,
-		AskPrice:  0,
-		Volume:    qty,
-		TradeId:   strconv.FormatInt(evt.TradeID, 10),
+		Price:     evt.Price,
+		Volume:    evt.Quantity,
+		TradeId:   evt.TradeID,
 	}
 
-	// Сериализация
 	payload, err := proto.Marshal(msg)
 	if err != nil {
-		p.log.Sugar().Errorw("processor: proto marshal error", "error", err)
-		metrics.PublishErrors.Inc()
+		metrics.SerializeErrors.Inc()
+		p.log.WithContext(ctx).Error("marshal trade proto failed", zap.Error(err))
+		span.RecordError(err)
 		return nil
 	}
 
-	// Публикация
 	if err := p.producer.Publish(ctx, p.topics.RawTopic, nil, payload); err != nil {
-		p.log.Sugar().Errorw("processor: publish trade error", "error", err)
 		metrics.PublishErrors.Inc()
+		p.log.WithContext(ctx).Error("publish trade failed", zap.Error(err))
+		span.RecordError(err)
 		return err
 	}
 
-	// Latency metric
 	metrics.PublishLatency.Observe(time.Since(start).Seconds())
 	return nil
 }
 
-func (p *Processor) handleDepth(ctx context.Context, data []byte, start time.Time) error {
-	// Структура JSON-ответа Binance для depthUpdate
-	var evt struct {
-		EventType string     `json:"e"`
-		EventTime int64      `json:"E"`
-		Symbol    string     `json:"s"`
-		Bids      [][]string `json:"b"` // [price, quantity]
-		Asks      [][]string `json:"a"`
+type tradeEvent struct {
+	EventTime int64
+	Symbol    string
+	Price     float64
+	Quantity  float64
+	TradeID   string
+}
+
+func parseTrade(data []byte) (*tradeEvent, error) {
+	var raw struct {
+		E  string `json:"e"`
+		Ev int64  `json:"E"`
+		S  string `json:"s"`
+		P  string `json:"p"`
+		Q  string `json:"q"`
+		T  int64  `json:"t"`
 	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		p.log.Sugar().Errorw("processor: failed unmarshal depth", "error", err)
-		metrics.PublishErrors.Inc()
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	price, err := strconv.ParseFloat(raw.P, 64)
+	if err != nil {
+		return nil, fmt.Errorf("price=%q: %w", raw.P, err)
+	}
+	qty, err := strconv.ParseFloat(raw.Q, 64)
+	if err != nil {
+		return nil, fmt.Errorf("quantity=%q: %w", raw.Q, err)
+	}
+	return &tradeEvent{
+		EventTime: raw.Ev,
+		Symbol:    raw.S,
+		Price:     price,
+		Quantity:  qty,
+		TradeID:   strconv.FormatInt(raw.T, 10),
+	}, nil
+}
+
+func (p *Processor) handleDepth(ctx context.Context, data []byte, start time.Time) error {
+	ctx, span := tracer.Start(ctx, "HandleDepth")
+	defer span.End()
+
+	evt, err := parseDepth(data)
+	if err != nil {
+		metrics.ParseErrors.Inc()
+		p.log.WithContext(ctx).Error("parse depth failed", zap.Error(err))
+		span.RecordError(err)
 		return nil
 	}
 
-	// Конвертация уровней книги
-	bids := make([]*marketdatapb.OrderBookLevel, 0, len(evt.Bids))
-	for _, lvl := range evt.Bids {
-		price, err := strconv.ParseFloat(lvl[0], 64)
-		if err != nil {
-			p.log.Sugar().Warnw("processor: invalid bid price format", "price", lvl[0], "error", err)
-			metrics.PublishErrors.Inc()
-			continue
-		}
-		qty, err := strconv.ParseFloat(lvl[1], 64)
-		if err != nil {
-			p.log.Sugar().Warnw("processor: invalid bid quantity format", "quantity", lvl[1], "error", err)
-			metrics.PublishErrors.Inc()
-			continue
-		}
-		bids = append(bids, &marketdatapb.OrderBookLevel{Price: price, Quantity: qty})
-	}
-	asks := make([]*marketdatapb.OrderBookLevel, 0, len(evt.Asks))
-	for _, lvl := range evt.Asks {
-		price, err := strconv.ParseFloat(lvl[0], 64)
-		if err != nil {
-			p.log.Sugar().Warnw("processor: invalid ask price format", "price", lvl[0], "error", err)
-			metrics.PublishErrors.Inc()
-			continue
-		}
-		qty, err := strconv.ParseFloat(lvl[1], 64)
-		if err != nil {
-			p.log.Sugar().Warnw("processor: invalid ask quantity format", "quantity", lvl[1], "error", err)
-			metrics.PublishErrors.Inc()
-			continue
-		}
-		asks = append(asks, &marketdatapb.OrderBookLevel{Price: price, Quantity: qty})
-	}
-
 	msg := &marketdatapb.OrderBookSnapshot{
-		Timestamp: timestamppb.New(time.Unix(evt.EventTime/1000, (evt.EventTime%1000)*1e6)),
+		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
 		Symbol:    evt.Symbol,
-		Bids:      bids,
-		Asks:      asks,
+		Bids:      evt.Bids,
+		Asks:      evt.Asks,
 	}
 
 	payload, err := proto.Marshal(msg)
 	if err != nil {
-		p.log.Sugar().Errorw("processor: proto marshal depth error", "error", err)
-		metrics.PublishErrors.Inc()
+		metrics.SerializeErrors.Inc()
+		p.log.WithContext(ctx).Error("marshal depth proto failed", zap.Error(err))
+		span.RecordError(err)
 		return nil
 	}
 
 	if err := p.producer.Publish(ctx, p.topics.OrderBookTopic, nil, payload); err != nil {
-		p.log.Sugar().Errorw("processor: publish depth error", "error", err)
 		metrics.PublishErrors.Inc()
+		p.log.WithContext(ctx).Error("publish depth failed", zap.Error(err))
+		span.RecordError(err)
 		return err
 	}
 
 	metrics.PublishLatency.Observe(time.Since(start).Seconds())
 	return nil
+}
+
+type depthEvent struct {
+	EventTime int64
+	Symbol    string
+	Bids      []*marketdatapb.OrderBookLevel
+	Asks      []*marketdatapb.OrderBookLevel
+}
+
+func parseDepth(data []byte) (*depthEvent, error) {
+	var raw struct {
+		E  string     `json:"e"`
+		Ev int64      `json:"E"`
+		S  string     `json:"s"`
+		B  [][]string `json:"b"`
+		A  [][]string `json:"a"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	convert := func(pair []string) (*marketdatapb.OrderBookLevel, error) {
+		price, err := strconv.ParseFloat(pair[0], 64)
+		if err != nil {
+			return nil, fmt.Errorf("price=%q: %w", pair[0], err)
+		}
+		qty, err := strconv.ParseFloat(pair[1], 64)
+		if err != nil {
+			return nil, fmt.Errorf("quantity=%q: %w", pair[1], err)
+		}
+		return &marketdatapb.OrderBookLevel{Price: price, Quantity: qty}, nil
+	}
+
+	bids := make([]*marketdatapb.OrderBookLevel, 0, len(raw.B))
+	for _, p := range raw.B {
+		if lvl, err := convert(p); err == nil {
+			bids = append(bids, lvl)
+		}
+	}
+	asks := make([]*marketdatapb.OrderBookLevel, 0, len(raw.A))
+	for _, p := range raw.A {
+		if lvl, err := convert(p); err == nil {
+			asks = append(asks, lvl)
+		}
+	}
+	return &depthEvent{
+		EventTime: raw.Ev,
+		Symbol:    raw.S,
+		Bids:      bids,
+		Asks:      asks,
+	}, nil
 }

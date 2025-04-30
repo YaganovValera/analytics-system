@@ -12,33 +12,42 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/telemetry"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
-// Run запускает market-data-collector: инициализирует метрики, телеметрию, HTTP-сервер,
-// WebSocket-коннектор и конвейер обработки сообщений в Kafka.
+// Run wires up and runs the collector service.
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	// 1. Распечатать конфигурацию
-	if err := cfg.Print(); err != nil {
-		log.Sugar().Warnw("config: failed to print configuration", "error", err)
+	// 1) Debug: print loaded config
+	cfg.Print()
+
+	// 2) Processor metrics
+	metrics.Register(nil)
+
+	// 3) OpenTelemetry
+	shutdownOTel, err := telemetry.InitTracer(ctx, telemetry.Config{
+		Endpoint:       cfg.Telemetry.OTLPEndpoint,
+		ServiceName:    cfg.ServiceName,
+		ServiceVersion: cfg.ServiceVersion,
+		Insecure:       cfg.Telemetry.Insecure,
+	}, log)
+	if err != nil {
+		return fmt.Errorf("telemetry init: %w", err)
 	}
+	defer func() { _ = shutdownOTel(context.Background()) }()
 
-	// 2. Регистрация метрик
-	metrics.Register()
-
-	// 3. Создание HTTP-сервера
-	readiness := func() error { return nil }
+	// 4) HTTP endpoints: /metrics, /healthz, /readyz
 	httpSrv := httpserver.NewServer(
-		fmt.Sprintf(":%d", cfg.HTTP.HealthPort),
-		readiness,
+		fmt.Sprintf(":%d", cfg.HTTP.Port),
+		func() error { return nil }, // placeholder readiness
 		log,
 	)
 
-	// 4. WebSocket-коннектор
+	// 5) Binance WS connector
 	wsConn, err := binance.NewConnector(binance.Config{
-		WSURL:         cfg.Binance.WSURL,
-		Symbols:       cfg.Binance.Symbols,
-		BufferSize:    cfg.Buffer.Size,
+		URL:           cfg.Binance.WSURL,
+		Streams:       cfg.Binance.Symbols,
 		ReadTimeout:   cfg.Binance.ReadTimeout,
 		BackoffConfig: cfg.Binance.Backoff,
 	}, log)
@@ -50,8 +59,8 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("ws stream: %w", err)
 	}
 
-	// 5 Kafka-продьюсер
-	producer, err := kafka.NewProducer(ctx, kafka.Config{
+	// 6) Kafka producer
+	prod, err := kafka.NewProducer(ctx, kafka.Config{
 		Brokers:        cfg.Kafka.Brokers,
 		RequiredAcks:   cfg.Kafka.Acks,
 		Timeout:        cfg.Kafka.Timeout,
@@ -63,16 +72,21 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("kafka producer init: %w", err)
 	}
-	defer producer.Close()
+	defer prod.Close()
 
-	// 6. Processor
+	// 7) Processor pipeline
 	proc := processor.New(
-		producer,
-		processor.Topics{RawTopic: cfg.Kafka.Topics.Raw, OrderBookTopic: cfg.Kafka.Topics.OrderBook},
+		prod,
+		processor.Topics{
+			RawTopic:       cfg.Kafka.RawTopic,
+			OrderBookTopic: cfg.Kafka.OrderBookTopic,
+		},
 		log,
 	)
 
-	// 7. Errgroup для HTTP и pipeline
+	log.Info("collector: all components initialized, starting loops")
+
+	// 8) Run HTTP server and processing loop concurrently
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -89,13 +103,13 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 					return fmt.Errorf("ws channel closed")
 				}
 				if err := proc.Process(ctx, raw); err != nil {
-					log.Sugar().Errorw("processor error", "error", err)
+					log.WithContext(ctx).Error("processor error", zap.Error(err))
 				}
 			}
 		}
 	})
 
-	// 8. Ожидание завершения
+	// 9) Wait for either loop to exit
 	err = g.Wait()
 	log.Sync()
 	return err

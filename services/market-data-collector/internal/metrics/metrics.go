@@ -1,3 +1,4 @@
+// services/market-data-collector/internal/metrics/metrics.go
 package metrics
 
 import (
@@ -7,56 +8,55 @@ import (
 )
 
 var (
-	once sync.Once
-
-	// EventsTotal — общее число принятых RawMessage из WebSocket.
-	EventsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "collector",
-		Subsystem: "ws",
-		Name:      "events_total",
-		Help:      "Total number of events received from WebSocket",
-	})
-
-	// PublishErrors — число ошибок при публикации сообщений в Kafka.
-	PublishErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "collector",
-		Subsystem: "kafka",
-		Name:      "publish_errors_total",
-		Help:      "Total number of errors when publishing to Kafka",
-	})
-
-	// BufferDrops — число сообщений, отброшенных из-за переполнения буфера.
-	BufferDrops = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "collector",
-		Subsystem: "ws",
-		Name:      "buffer_drops_total",
-		Help:      "Number of messages dropped because buffer was full",
-	})
-
-	// PublishLatency — гистограмма задержек от получения WS до публикации в Kafka.
-	PublishLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Namespace: "collector",
-		Subsystem: "pipeline",
-		Name:      "publish_latency_seconds",
-		Help:      "Latency from receiving WS event to publishing to Kafka (seconds)",
-		Buckets:   prometheus.DefBuckets,
-	})
+	once              sync.Once
+	EventsTotal       prometheus.Counter
+	UnsupportedEvents prometheus.Counter
+	ParseErrors       prometheus.Counter
+	SerializeErrors   prometheus.Counter
+	PublishErrors     prometheus.Counter
+	PublishLatency    prometheus.Histogram
 )
 
-// Register регистрирует все метрики в заданном реестре.
-// Можно вызвать без аргументов, чтобы зарегистрировать в DefaultRegisterer.
-func Register(registerers ...prometheus.Registerer) {
+// Register initializes and registers all processor metrics exactly once.
+// If r is nil, it uses prometheus.DefaultRegisterer.
+func Register(r prometheus.Registerer) {
 	once.Do(func() {
-		var reg prometheus.Registerer
-		if len(registerers) > 0 && registerers[0] != nil {
-			reg = registerers[0]
-		} else {
-			reg = prometheus.DefaultRegisterer
+		if r == nil {
+			r = prometheus.DefaultRegisterer
 		}
-		reg.MustRegister(
+
+		EventsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "events_total",
+			Help: "Total number of raw events processed",
+		})
+		UnsupportedEvents = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "unsupported_events_total",
+			Help: "Number of raw events skipped due to unsupported type",
+		})
+		ParseErrors = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "parse_errors_total",
+			Help: "Number of JSON parse errors in raw events",
+		})
+		SerializeErrors = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "serialize_errors_total",
+			Help: "Number of Protobuf serialization errors",
+		})
+		PublishErrors = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "publish_errors_total",
+			Help: "Number of errors publishing messages to Kafka",
+		})
+		PublishLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "collector", Subsystem: "processor", Name: "publish_latency_seconds",
+			Help:    "Latency from WS ingestion to Kafka publish (seconds)",
+			Buckets: prometheus.DefBuckets,
+		})
+
+		r.MustRegister(
 			EventsTotal,
+			UnsupportedEvents,
+			ParseErrors,
+			SerializeErrors,
 			PublishErrors,
-			BufferDrops,
 			PublishLatency,
 		)
 	})

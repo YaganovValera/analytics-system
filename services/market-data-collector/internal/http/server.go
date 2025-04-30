@@ -1,4 +1,3 @@
-// services/market-data-collector/internal/http/server.go
 package http
 
 import (
@@ -7,36 +6,32 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
-// ReadyChecker определяет функцию проверки готовности сервиса.
+// ReadyChecker returns nil if the service is ready.
 type ReadyChecker func() error
 
-// Server инкапсулирует HTTP-сервер для /metrics, /healthz и /readyz.
+// Server hosts the HTTP endpoints for metrics, liveness, and readiness.
 type Server struct {
-	srv       *http.Server
-	readiness ReadyChecker
-	log       *logger.Logger
+	httpServer *http.Server
+	checkReady ReadyChecker
+	log        *logger.Logger
 }
 
-// NewServer создаёт новый HTTP-сервер, слушающий addr (например, ":8080").
-// readiness — функция, возвращающая ошибку, если сервис не готов.
-// log — обёрнутый логгер.
-func NewServer(addr string, readiness ReadyChecker, log *logger.Logger) *Server {
+// NewServer constructs an HTTP server listening on addr.
+// The readiness function is invoked on /readyz.
+func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) *Server {
 	mux := http.NewServeMux()
-	// /metrics — Prometheus
 	mux.Handle("/metrics", promhttp.Handler())
-	// /healthz — liveness probe
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
-	// /readyz — readiness probe
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := readiness(); err != nil {
+		if err := checkReady(); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(fmt.Sprintf("NOT READY: %v", err)))
 			return
@@ -45,35 +40,35 @@ func NewServer(addr string, readiness ReadyChecker, log *logger.Logger) *Server 
 		_, _ = w.Write([]byte("READY"))
 	})
 
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+	return &Server{
+		httpServer: &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		},
+		checkReady: checkReady,
+		log:        log.Named("http-server"),
 	}
-	return &Server{srv: srv, readiness: readiness, log: log}
 }
 
-// Start запускает HTTP-сервер и возвращает ошибку, если старт не удался.
-// Ожидает ctx.Done() для graceful shutdown.
+// Start runs the HTTP server in a goroutine and waits for ctx cancellation.
+// Upon cancellation, it performs a graceful shutdown with a 5s timeout.
 func (s *Server) Start(ctx context.Context) error {
 	go func() {
-		s.log.Sugar().Infow("http: starting server", "addr", s.srv.Addr)
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.log.Sugar().Errorw("http: server error", "error", err)
+		s.log.Info("http: starting server", zap.String("addr", s.httpServer.Addr))
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.log.Error("http: server error", zap.Error(err))
 		}
 	}()
 
-	// Ожидаем отмены контекста
 	<-ctx.Done()
-	s.log.Sugar().Infow("http: shutdown signal received")
+	s.log.Info("http: shutdown signal received")
 
-	// Даем до 5 секунд на завершение
-	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	if err := s.srv.Shutdown(shutCtx); err != nil {
-		s.log.Sugar().Errorw("http: graceful shutdown failed", "error", err)
+	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+		s.log.Error("http: graceful shutdown failed", zap.Error(err))
 		return err
 	}
-	s.log.Sugar().Infow("http: server stopped gracefully")
+	s.log.Info("http: server stopped gracefully")
 	return nil
 }
