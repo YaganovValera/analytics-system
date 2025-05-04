@@ -3,7 +3,7 @@
 # Перечень микросервисов (только имена папок под services/)
 GO_SERVICES  := market-data-collector preprocessor auth api-gateway analytics-api
 
-PROTO_DIR   := proto/v2
+PROTO_DIR   := proto/v1
 PROTO_FILES := $(shell find $(PROTO_DIR) -name '*.proto')
 
 .PHONY: proto-gen

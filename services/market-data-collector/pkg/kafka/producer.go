@@ -62,10 +62,10 @@ func (c *Config) applyDefaults() {
 		c.Timeout = 5 * time.Second
 	}
 	if c.FlushFrequency < 0 {
-		c.FlushFrequency = 0
+		c.FlushFrequency = 100 * time.Millisecond
 	}
 	if c.FlushMessages < 0 {
-		c.FlushMessages = 0
+		c.FlushMessages = 100
 	}
 }
 
@@ -116,6 +116,7 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 	}
 
 	// Enable idempotence
+	sc.Net.MaxOpenRequests = 1
 	sc.Producer.Idempotent = true
 
 	return sc, nil
@@ -124,6 +125,7 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 // Producer wraps a sarama.SyncProducer with backoff, metrics, and tracing.
 type Producer struct {
 	prod       sarama.SyncProducer
+	client     sarama.Client
 	logger     *logger.Logger
 	backoffCfg backoff.Config
 }
@@ -141,11 +143,16 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer
 		return nil, err
 	}
 
+	client, err := sarama.NewClient(cfg.Brokers, sc)
+	if err != nil {
+		return nil, fmt.Errorf("kafka: new client: %w", err)
+	}
+
 	var syncProd sarama.SyncProducer
 	connect := func(ctx context.Context) error {
 		producerConnectAttempts.Inc()
 		var err error
-		syncProd, err = sarama.NewSyncProducer(cfg.Brokers, sc)
+		syncProd, err = sarama.NewSyncProducerFromClient(client)
 		if err != nil {
 			producerConnectFailures.Inc()
 		}
@@ -167,7 +174,12 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer
 	wrapped := otelsarama.WrapSyncProducer(sc, syncProd)
 	log.Info("kafka: producer ready", zap.Strings("brokers", cfg.Brokers))
 
-	return &Producer{prod: wrapped, logger: log, backoffCfg: cfg.Backoff}, nil
+	return &Producer{
+		prod:       wrapped,
+		client:     client,
+		logger:     log,
+		backoffCfg: cfg.Backoff,
+	}, nil
 }
 
 // Publish sends a message with retry, emits metrics, and traces.
@@ -212,6 +224,16 @@ func (p *Producer) Close() error {
 		p.logger.Error("kafka: producer close failed", zap.Error(err))
 		return err
 	}
+
+	if err := p.client.Close(); err != nil {
+		p.logger.Error("kafka: client close failed", zap.Error(err))
+		return err
+	}
 	p.logger.Info("kafka: producer closed")
 	return nil
+}
+
+// Ping проверяет, что Kafka всё ещё доступна (обновляет metadata).
+func (p *Producer) Ping() error {
+	return p.client.RefreshMetadata()
 }

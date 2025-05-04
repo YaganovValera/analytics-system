@@ -2,14 +2,25 @@ receivers:
   otlp:
     protocols:
       grpc:
+        endpoint: 0.0.0.0:4317  # <--- вот здесь ключ
       http:
+        endpoint: 0.0.0.0:4318  # тоже пригодится
 
 exporters:
-  debug:
-    verbosity: detailed
+  debug: {}
+  jaeger:
+    endpoint: "jaeger:14250"
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+    path: "/healthz"
 
 service:
+  extensions: [health_check]
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [debug]
+      exporters: [debug, jaeger]

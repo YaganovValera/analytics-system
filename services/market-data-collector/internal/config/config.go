@@ -4,6 +4,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,8 +58,7 @@ type HTTPConfig struct {
 	Port int `mapstructure:"port"`
 }
 
-// Load reads defaults, environment variables (COLLECTOR_*),
-// an optional config file at path, then decodes into Config and validates.
+// Load reads defaults, ENV (COLLECTOR_*), optional config file, decodes into Config and validates.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
@@ -81,7 +82,7 @@ func Load(path string) (*Config, error) {
 
 	v.SetDefault("http.port", 8080)
 
-	// 2) Environment
+	// 2) ENV
 	v.SetEnvPrefix("COLLECTOR")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -94,15 +95,24 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// 4) Decode into struct
+	// 4) Decode into struct with hooks for durations, slices and bools
 	var cfg Config
+	decodeHook := mapstructure.ComposeDecodeHookFunc(
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+		func(
+			f reflect.Kind, t reflect.Kind, data interface{},
+		) (interface{}, error) {
+			if f == reflect.String && t == reflect.Bool {
+				return strconv.ParseBool(data.(string))
+			}
+			return data, nil
+		},
+	)
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		TagName: "mapstructure",
-		Result:  &cfg,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
-		),
+		TagName:    "mapstructure",
+		Result:     &cfg,
+		DecodeHook: decodeHook,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create decoder: %w", err)
@@ -111,7 +121,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
 
-	// 5) Validation
+	// 5) Validate required fields
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
@@ -167,10 +177,11 @@ func (c *Config) Validate() error {
 	if c.HTTP.Port <= 0 || c.HTTP.Port > 65535 {
 		return fmt.Errorf("http.port must be between 1 and 65535")
 	}
+
 	return nil
 }
 
-// Print writes the loaded configuration as JSON.
+// Print outputs the loaded configuration as JSON.
 func (c *Config) Print() {
 	b, _ := json.MarshalIndent(c, "", "  ")
 	fmt.Println("Loaded configuration:\n", string(b))

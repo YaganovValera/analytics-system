@@ -37,7 +37,7 @@ func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) *Server
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("READY"))
+		_, _ = w.Write([]byte("READY!"))
 	})
 
 	return &Server{

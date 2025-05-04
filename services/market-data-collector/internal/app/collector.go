@@ -19,10 +19,7 @@ import (
 
 // Run wires up and runs the collector service.
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	// 1) Debug: print loaded config
-	cfg.Print()
-
-	// 2) Processor metrics
+	// Регистрация метрик
 	metrics.Register(nil)
 
 	// 3) OpenTelemetry
@@ -36,13 +33,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("telemetry init: %w", err)
 	}
 	defer func() { _ = shutdownOTel(context.Background()) }()
-
-	// 4) HTTP endpoints: /metrics, /healthz, /readyz
-	httpSrv := httpserver.NewServer(
-		fmt.Sprintf(":%d", cfg.HTTP.Port),
-		func() error { return nil }, // placeholder readiness
-		log,
-	)
 
 	// 5) Binance WS connector
 	wsConn, err := binance.NewConnector(binance.Config{
@@ -81,6 +71,20 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 			RawTopic:       cfg.Kafka.RawTopic,
 			OrderBookTopic: cfg.Kafka.OrderBookTopic,
 		},
+		log,
+	)
+
+	// 7) HTTP endpoints: /metrics, /healthz, /readyz
+	readiness := func() error {
+		// Проверяем доступность Kafka
+		if err := prod.Ping(); err != nil {
+			return fmt.Errorf("kafka not ready: %w", err)
+		}
+		return nil
+	}
+	httpSrv := httpserver.NewServer(
+		fmt.Sprintf(":%d", cfg.HTTP.Port),
+		readiness,
 		log,
 	)
 
