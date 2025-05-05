@@ -1,9 +1,11 @@
+// services/market-data-collector/pkg/binance/ws.go
 package binance
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,7 +23,6 @@ import (
 )
 
 var (
-	// Prometheus metrics
 	wsConnects = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "collector", Subsystem: "binance_ws", Name: "connects_total",
 		Help: "Total WebSocket connection attempts",
@@ -58,20 +59,20 @@ var (
 
 var tracer = otel.Tracer("binance-ws")
 
-// RawMessage carries unmodified JSON payload and its event type.
+// RawMessage несёт JSON-байты и тип события.
 type RawMessage struct {
-	Data []byte // JSON bytes
-	Type string // event type, e.g. "trade" or "depthUpdate"
+	Data []byte
+	Type string
 }
 
-// Config defines WebSocket connection settings.
+// Config задаёт WS параметры.
 type Config struct {
-	URL              string         // e.g. "wss://stream.binance.com:9443/ws"
-	Streams          []string       // e.g. ["btcusdt@trade","btcusdt@depth"]
-	BufferSize       int            // channel buffer size
-	ReadTimeout      time.Duration  // pong wait timeout
-	SubscribeTimeout time.Duration  // write deadline for SUBSCRIBE
-	BackoffConfig    backoff.Config // retry settings
+	URL              string
+	Streams          []string
+	BufferSize       int
+	ReadTimeout      time.Duration
+	SubscribeTimeout time.Duration
+	BackoffConfig    backoff.Config
 }
 
 func (c *Config) applyDefaults() {
@@ -96,42 +97,64 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// Connector manages a Binance WebSocket connection with auto-reconnect.
-type Connector struct {
+// binanceConnector — приватная реализация Connector.
+type binanceConnector struct {
 	cfg         Config
 	log         *logger.Logger
 	subscribeID uint64
+
+	mu         sync.Mutex
+	conn       *websocket.Conn
+	cancelPing context.CancelFunc
+
+	closed atomic.Bool
 }
 
-// NewConnector constructs a Connector, applies defaults and validates.
-func NewConnector(cfg Config, log *logger.Logger) (*Connector, error) {
+// NewConnector создаёт Connector.
+func NewConnector(cfg Config, log *logger.Logger) (Connector, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Connector{
+	return &binanceConnector{
 		cfg: cfg,
 		log: log.Named("binance-ws"),
 	}, nil
 }
 
-// Stream begins listening to the WebSocket and sends RawMessages to the returned channel.
-func (c *Connector) Stream(ctx context.Context) (<-chan RawMessage, error) {
+// Stream возвращает канал и запускает работу коннектора.
+func (c *binanceConnector) Stream(ctx context.Context) (<-chan RawMessage, error) {
 	ch := make(chan RawMessage, c.cfg.BufferSize)
 	go c.run(ctx, ch)
 	return ch, nil
 }
 
-func (c *Connector) run(ctx context.Context, ch chan<- RawMessage) {
+// Close сразу закрывает текущее соединение и пинг-рутину.
+func (c *binanceConnector) Close() error {
+	c.closed.Store(true)
+
+	c.mu.Lock()
+	if c.cancelPing != nil {
+		c.cancelPing()
+	}
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *binanceConnector) run(ctx context.Context, ch chan<- RawMessage) {
 	defer close(ch)
 
 	for {
-		if err := ctx.Err(); err != nil {
-			c.log.Info("ws: context cancelled, stopping")
+		// 1) Выход, если ctx отменён или Close() вызван
+		if ctx.Err() != nil || c.closed.Load() {
+			c.log.Info("ws: stopping run loop")
 			return
 		}
 
-		// --- Connect with retry ---
+		// 2) Подключение
 		wsConnects.Inc()
 		ctxConn, spanConn := tracer.Start(ctx, "WS.Connect",
 			trace.WithAttributes(attribute.String("url", c.cfg.URL)))
@@ -142,26 +165,40 @@ func (c *Connector) run(ctx context.Context, ch chan<- RawMessage) {
 			wsConnectErrors.Inc()
 			wsReconnects.Inc()
 			c.log.Error("ws: connect failed", zap.Error(err))
-			continue
+			// после неудачного backoff (exhausted) прекращаем попытки
+			return
 		}
+
+		// Сохраняем conn для Close()
+		c.mu.Lock()
+		c.conn = conn
+		c.mu.Unlock()
+
 		c.log.Info("ws: connected", zap.String("url", c.cfg.URL))
 
-		// --- Start pinging ---
+		// 3) Ping
 		cancelPing := c.startPinger(ctx, conn)
+		c.mu.Lock()
+		c.cancelPing = cancelPing
+		c.mu.Unlock()
 
-		// --- Subscribe ---
+		// 4) Subscribe с retry
 		ctxSub, spanSub := tracer.Start(ctx, "WS.Subscribe")
-		if err := c.subscribe(ctxSub, conn); err != nil {
-			wsSubscribeErrors.Inc()
-			spanSub.RecordError(err)
-			spanSub.End()
-			cancelPing()
-			conn.Close()
-			continue
-		}
+		err = backoff.Execute(ctxSub, c.cfg.BackoffConfig, c.log, func(ctx context.Context) error {
+			return c.subscribe(ctx, conn)
+		})
 		spanSub.End()
+		if err != nil {
+			wsSubscribeErrors.Inc()
+			c.log.Error("ws: subscribe failed", zap.Error(err))
+			cancelPing()
+			_ = conn.Close()
+			wsReconnects.Inc()
+			// после неудачных попыток подписки прекращаем работу
+			return
+		}
 
-		// --- Read loop ---
+		// 5) ReadLoop
 		ctxRead, spanRead := tracer.Start(ctx, "WS.ReadLoop")
 		if err := c.readLoop(ctxRead, conn, ch); err != nil {
 			wsReadErrors.Inc()
@@ -170,26 +207,24 @@ func (c *Connector) run(ctx context.Context, ch chan<- RawMessage) {
 		}
 		spanRead.End()
 
+		// Cleanup перед новой итерацией
 		cancelPing()
-		conn.Close()
+		_ = conn.Close()
 		wsReconnects.Inc()
 	}
 }
 
-func (c *Connector) connect(ctx context.Context) (*websocket.Conn, error) {
+func (c *binanceConnector) connect(ctx context.Context) (*websocket.Conn, error) {
 	var conn *websocket.Conn
-	op := func(ctx context.Context) error {
+	err := backoff.Execute(ctx, c.cfg.BackoffConfig, c.log, func(ctx context.Context) error {
 		var err error
 		conn, _, err = websocket.DefaultDialer.DialContext(ctx, c.cfg.URL, nil)
 		return err
-	}
-	if err := backoff.Execute(ctx, c.cfg.BackoffConfig, c.log, op); err != nil {
-		return nil, err
-	}
-	return conn, nil
+	})
+	return conn, err
 }
 
-func (c *Connector) startPinger(ctx context.Context, conn *websocket.Conn) context.CancelFunc {
+func (c *binanceConnector) startPinger(ctx context.Context, conn *websocket.Conn) context.CancelFunc {
 	conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
@@ -197,7 +232,6 @@ func (c *Connector) startPinger(ctx context.Context, conn *websocket.Conn) conte
 
 	pingCtx, cancel := context.WithCancel(ctx)
 	ticker := time.NewTicker(c.cfg.ReadTimeout / 3)
-
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -205,19 +239,18 @@ func (c *Connector) startPinger(ctx context.Context, conn *websocket.Conn) conte
 			case <-pingCtx.Done():
 				return
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(time.Second))
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
+				conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(1*time.Second)); err != nil {
 					wsPingErrors.Inc()
 					c.log.Warn("ws: ping failed", zap.Error(err))
 				}
 			}
 		}
 	}()
-
 	return cancel
 }
 
-func (c *Connector) subscribe(ctx context.Context, conn *websocket.Conn) error {
+func (c *binanceConnector) subscribe(ctx context.Context, conn *websocket.Conn) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -233,12 +266,11 @@ func (c *Connector) subscribe(ctx context.Context, conn *websocket.Conn) error {
 	return conn.WriteJSON(req)
 }
 
-func (c *Connector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<- RawMessage) error {
+func (c *binanceConnector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<- RawMessage) error {
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-
 		_, bytes, err := conn.ReadMessage()
 		if err != nil {
 			return err
@@ -264,7 +296,6 @@ func (c *Connector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<
 		select {
 		case ch <- RawMessage{Data: env.Data, Type: msgType}:
 		default:
-			// **Reintroduced** BufferDrops to track dropped messages
 			wsBufferDrops.Inc()
 			c.log.Warn("ws: buffer full, dropping message", zap.String("type", msgType))
 		}

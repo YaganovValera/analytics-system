@@ -11,19 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
-// ReadyChecker returns nil if the service is ready.
+// ReadyChecker возвращает nil, если сервис готов.
 type ReadyChecker func() error
 
-// Server hosts the HTTP endpoints for metrics, liveness, and readiness.
+// Server инкапсулирует HTTP эндпоинты: /metrics, /healthz, /readyz.
 type Server struct {
 	httpServer *http.Server
 	checkReady ReadyChecker
 	log        *logger.Logger
 }
 
-// NewServer constructs an HTTP server listening on addr.
-// The readiness function is invoked on /readyz.
-func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) *Server {
+// NewServer создаёт HTTPServer по адресу addr.
+// checkReady вызывается на /readyz.
+func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) HTTPServer {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) *Server
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("READY!"))
+		_, _ = w.Write([]byte("READY"))
 	})
 
 	return &Server{
@@ -50,8 +50,8 @@ func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) *Server
 	}
 }
 
-// Start runs the HTTP server in a goroutine and waits for ctx cancellation.
-// Upon cancellation, it performs a graceful shutdown with a 5s timeout.
+// Start запускает HTTP-сервер и ждёт отмены ctx.
+// По отмене выполняется graceful shutdown с таймаутом 5 секунд.
 func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		s.log.Info("http: starting server", zap.String("addr", s.httpServer.Addr))

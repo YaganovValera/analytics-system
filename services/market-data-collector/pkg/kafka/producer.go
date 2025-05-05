@@ -1,3 +1,4 @@
+// services/market-data-collector/pkg/kafka/producer.go
 package kafka
 
 import (
@@ -46,7 +47,7 @@ var (
 
 var tracer = otel.Tracer("kafka-producer")
 
-// Config holds Kafka producer settings.
+// Config хранит настройки Kafka продьюсера.
 type Config struct {
 	Brokers        []string
 	RequiredAcks   string
@@ -61,25 +62,18 @@ func (c *Config) applyDefaults() {
 	if c.Timeout <= 0 {
 		c.Timeout = 5 * time.Second
 	}
-	if c.FlushFrequency < 0 {
-		c.FlushFrequency = 100 * time.Millisecond
-	}
-	if c.FlushMessages < 0 {
-		c.FlushMessages = 100
-	}
 }
 
 func (c *Config) validate() error {
 	if len(c.Brokers) == 0 {
-		return fmt.Errorf("kafka: Brokers is required")
+		return fmt.Errorf("kafka: brokers required")
 	}
+	// остальные в buildSaramaConfig
 	return nil
 }
 
 func buildSaramaConfig(c Config) (*sarama.Config, error) {
 	sc := sarama.NewConfig()
-
-	// RequiredAcks
 	switch strings.ToLower(c.RequiredAcks) {
 	case "", "all":
 		sc.Producer.RequiredAcks = sarama.WaitForAll
@@ -90,16 +84,17 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 	default:
 		return nil, fmt.Errorf("kafka: invalid RequiredAcks %q", c.RequiredAcks)
 	}
-
 	sc.Producer.Return.Successes = true
 	sc.Producer.Return.Errors = true
 	sc.Producer.Timeout = c.Timeout
 
-	// Batching
-	sc.Producer.Flush.Frequency = c.FlushFrequency
-	sc.Producer.Flush.Messages = c.FlushMessages
+	if f := c.FlushFrequency; f > 0 {
+		sc.Producer.Flush.Frequency = f
+	}
+	if m := c.FlushMessages; m > 0 {
+		sc.Producer.Flush.Messages = m
+	}
 
-	// Compression
 	switch strings.ToLower(c.Compression) {
 	case "", "none":
 		sc.Producer.Compression = sarama.CompressionNone
@@ -115,23 +110,23 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 		return nil, fmt.Errorf("kafka: invalid Compression %q", c.Compression)
 	}
 
-	// Enable idempotence
-	sc.Net.MaxOpenRequests = 1
+	// Идемпотентность для безопасных повторов
 	sc.Producer.Idempotent = true
+	sc.Net.MaxOpenRequests = 1
 
 	return sc, nil
 }
 
-// Producer wraps a sarama.SyncProducer with backoff, metrics, and tracing.
-type Producer struct {
+// kafkaProducer — внутренняя реализация интерфейса Producer.
+type kafkaProducer struct {
 	prod       sarama.SyncProducer
 	client     sarama.Client
 	logger     *logger.Logger
 	backoffCfg backoff.Config
 }
 
-// NewProducer creates and connects a Kafka SyncProducer with retries.
-func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer, error) {
+// NewProducer создаёт и возвращает интерфейс Producer.
+func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (Producer, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -151,15 +146,16 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer
 	var syncProd sarama.SyncProducer
 	connect := func(ctx context.Context) error {
 		producerConnectAttempts.Inc()
-		var err error
-		syncProd, err = sarama.NewSyncProducerFromClient(client)
+		p, err := sarama.NewSyncProducerFromClient(client)
 		if err != nil {
 			producerConnectFailures.Inc()
+			return err
 		}
-		return err
+		syncProd = p
+		return nil
 	}
 
-	// Trace the connection attempt
+	// Трассируем попытку подключения
 	ctx, span := tracer.Start(ctx, "Connect",
 		trace.WithAttributes(attribute.StringSlice("brokers", cfg.Brokers)))
 	if err := backoff.Execute(ctx, cfg.Backoff, log, connect); err != nil {
@@ -170,11 +166,10 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer
 	}
 	span.End()
 
-	// Wrap with OTEL instrumentation
 	wrapped := otelsarama.WrapSyncProducer(sc, syncProd)
 	log.Info("kafka: producer ready", zap.Strings("brokers", cfg.Brokers))
 
-	return &Producer{
+	return &kafkaProducer{
 		prod:       wrapped,
 		client:     client,
 		logger:     log,
@@ -182,8 +177,8 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (*Producer
 	}, nil
 }
 
-// Publish sends a message with retry, emits metrics, and traces.
-func (p *Producer) Publish(ctx context.Context, topic string, key, value []byte) error {
+// Publish отправляет сообщение с retry, метриками и трассировкой.
+func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []byte) error {
 	ctx, span := tracer.Start(ctx, "Publish",
 		trace.WithAttributes(attribute.String("topic", topic)))
 	start := time.Now()
@@ -194,46 +189,45 @@ func (p *Producer) Publish(ctx context.Context, topic string, key, value []byte)
 			Key:   sarama.ByteEncoder(key),
 			Value: sarama.ByteEncoder(value),
 		}
-		_, _, err := p.prod.SendMessage(msg)
+		_, _, err := k.prod.SendMessage(msg)
 		return err
 	}
 
-	err := backoff.Execute(ctx, p.backoffCfg, p.logger, send)
+	err := backoff.Execute(ctx, k.backoffCfg, k.logger, send)
 	lat := time.Since(start).Seconds()
 	producerPublishLatency.Observe(lat)
 
 	if err != nil {
 		producerPublishErrors.Inc()
 		span.RecordError(err)
-		p.logger.Error("kafka: publish failed",
+		k.logger.Error("kafka: publish failed",
 			zap.String("topic", topic), zap.Error(err))
 		span.End()
 		return err
 	}
 
 	producerPublishSuccess.Inc()
-	p.logger.Debug("kafka: publish succeeded",
+	k.logger.Debug("kafka: publish succeeded",
 		zap.String("topic", topic), zap.Float64("latency_s", lat))
 	span.End()
 	return nil
 }
 
-// Close gracefully closes the Kafka producer.
-func (p *Producer) Close() error {
-	if err := p.prod.Close(); err != nil {
-		p.logger.Error("kafka: producer close failed", zap.Error(err))
-		return err
-	}
-
-	if err := p.client.Close(); err != nil {
-		p.logger.Error("kafka: client close failed", zap.Error(err))
-		return err
-	}
-	p.logger.Info("kafka: producer closed")
-	return nil
+// Ping проверяет доступность Kafka (refresh metadata).
+func (k *kafkaProducer) Ping() error {
+	return k.client.RefreshMetadata()
 }
 
-// Ping проверяет, что Kafka всё ещё доступна (обновляет metadata).
-func (p *Producer) Ping() error {
-	return p.client.RefreshMetadata()
+// Close корректно закрывает продьюсер и клиент.
+func (k *kafkaProducer) Close() error {
+	if err := k.prod.Close(); err != nil {
+		k.logger.Error("kafka: producer close failed", zap.Error(err))
+		return err
+	}
+	if err := k.client.Close(); err != nil {
+		k.logger.Error("kafka: client close failed", zap.Error(err))
+		return err
+	}
+	k.logger.Info("kafka: producer closed")
+	return nil
 }

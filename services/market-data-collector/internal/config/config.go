@@ -1,4 +1,3 @@
-// services/market-data-collector/internal/config/config.go
 package config
 
 import (
@@ -15,6 +14,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/backoff"
 )
 
+// Config — все настройки сервиса.
 type Config struct {
 	ServiceName    string        `mapstructure:"service_name"`
 	ServiceVersion string        `mapstructure:"service_version"`
@@ -25,13 +25,16 @@ type Config struct {
 	HTTP           HTTPConfig    `mapstructure:"http"`
 }
 
+// BinanceConfig хранит настройки для WS Binance.
 type BinanceConfig struct {
-	WSURL       string         `mapstructure:"ws_url"`
-	Symbols     []string       `mapstructure:"symbols"`
-	ReadTimeout time.Duration  `mapstructure:"read_timeout"`
-	Backoff     backoff.Config `mapstructure:"backoff"`
+	WSURL            string         `mapstructure:"ws_url"`
+	Symbols          []string       `mapstructure:"symbols"`
+	ReadTimeout      time.Duration  `mapstructure:"read_timeout"`
+	SubscribeTimeout time.Duration  `mapstructure:"subscribe_timeout"` // ← добавлено
+	Backoff          backoff.Config `mapstructure:"backoff"`
 }
 
+// KafkaConfig хранит настройки Kafka.
 type KafkaConfig struct {
 	Brokers        []string       `mapstructure:"brokers"`
 	RawTopic       string         `mapstructure:"raw_topic"`
@@ -44,21 +47,20 @@ type KafkaConfig struct {
 	Backoff        backoff.Config `mapstructure:"backoff"`
 }
 
+// Telemetry, Logging и HTTPConfig как было:
 type Telemetry struct {
 	OTLPEndpoint string `mapstructure:"otel_endpoint"`
 	Insecure     bool   `mapstructure:"insecure"`
 }
-
 type Logging struct {
 	Level   string `mapstructure:"level"`
 	DevMode bool   `mapstructure:"dev_mode"`
 }
-
 type HTTPConfig struct {
 	Port int `mapstructure:"port"`
 }
 
-// Load reads defaults, ENV (COLLECTOR_*), optional config file, decodes into Config and validates.
+// Load загружает и валидирует конфиг.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
@@ -68,6 +70,7 @@ func Load(path string) (*Config, error) {
 
 	v.SetDefault("binance.ws_url", "wss://stream.binance.com:9443/ws")
 	v.SetDefault("binance.read_timeout", "30s")
+	v.SetDefault("binance.subscribe_timeout", "5s") // ← добавлено
 	v.SetDefault("binance.symbols", []string{"btcusdt@trade"})
 
 	v.SetDefault("kafka.acks", "all")
@@ -95,14 +98,12 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// 4) Decode into struct with hooks for durations, slices and bools
+	// 4) Decode with hooks
 	var cfg Config
 	decodeHook := mapstructure.ComposeDecodeHookFunc(
 		mapstructure.StringToTimeDurationHookFunc(),
 		mapstructure.StringToSliceHookFunc(","),
-		func(
-			f reflect.Kind, t reflect.Kind, data interface{},
-		) (interface{}, error) {
+		func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
 			if f == reflect.String && t == reflect.Bool {
 				return strconv.ParseBool(data.(string))
 			}
@@ -121,15 +122,16 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
 
-	// 5) Validate required fields
+	// 5) Validation
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	return &cfg, nil
 }
 
-// Validate ensures all required fields are set and correct.
+// Validate проверяет обязательные поля.
 func (c *Config) Validate() error {
+	// service
 	if c.ServiceName == "" {
 		return fmt.Errorf("service_name is required")
 	}
@@ -137,13 +139,21 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("service_version is required")
 	}
 
+	// binance
 	if c.Binance.WSURL == "" {
 		return fmt.Errorf("binance.ws_url is required")
 	}
 	if len(c.Binance.Symbols) == 0 {
-		return fmt.Errorf("binance.symbols must contain at least one item")
+		return fmt.Errorf("binance.symbols must contain at least one entry")
+	}
+	if c.Binance.ReadTimeout <= 0 {
+		return fmt.Errorf("binance.read_timeout must be > 0")
+	}
+	if c.Binance.SubscribeTimeout <= 0 {
+		return fmt.Errorf("binance.subscribe_timeout must be > 0")
 	}
 
+	// kafka
 	if len(c.Kafka.Brokers) == 0 {
 		return fmt.Errorf("kafka.brokers is required")
 	}
@@ -163,10 +173,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("kafka.compression must be one of [none, gzip, snappy, lz4, zstd]")
 	}
 
+	// telemetry
 	if c.Telemetry.OTLPEndpoint == "" {
 		return fmt.Errorf("telemetry.otel_endpoint is required")
 	}
 
+	// logging
 	lvl := strings.ToLower(c.Logging.Level)
 	switch lvl {
 	case "debug", "info", "warn", "error":
@@ -174,6 +186,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("logging.level must be one of [debug, info, warn, error]")
 	}
 
+	// http
 	if c.HTTP.Port <= 0 || c.HTTP.Port > 65535 {
 		return fmt.Errorf("http.port must be between 1 and 65535")
 	}
@@ -181,7 +194,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Print outputs the loaded configuration as JSON.
+// Print выводит конфиг в формате JSON (для отладки).
 func (c *Config) Print() {
 	b, _ := json.MarshalIndent(c, "", "  ")
 	fmt.Println("Loaded configuration:\n", string(b))
