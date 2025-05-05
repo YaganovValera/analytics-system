@@ -1,4 +1,4 @@
-module github.com/YaganovValera/analytics-system/preprocessor
+module github.com/YaganovValera/analytics-system/services/preprocessor
 
 go 1.23.0
 

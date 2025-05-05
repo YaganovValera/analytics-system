@@ -1,18 +1,39 @@
-# preprocessor/config/config.yaml
+service_name: "preprocessor"
+service_version: "v1.0.0"
 
 kafka:
   brokers:
-    - "localhost:9092"
+    - "kafka:9092"
+  raw_topic: "marketdata.raw"
+  orderbook_topic: "marketdata.orderbook"
+  aggregation_topics:
+    - interval: "1m"
+      topic: "marketdata.agg.1m"
+    - interval: "5m"
+      topic: "marketdata.agg.5m"
+    - interval: "15m"
+      topic: "marketdata.agg.15m"
+    - interval: "1h"
+      topic: "marketdata.agg.1h"
   group_id: "preprocessor-group"
-  topic: "marketdata.raw"
+  backoff:
+    initial_interval: "1s"
+    max_interval: "30s"
+    max_elapsed_time: "5m"
 
 redis:
-  addr: "localhost:6379"
+  address: "redis:6379"
   password: ""
   db: 0
-  # по сколько секунд хранить сырые данные (TTL)
-  ttl_seconds: 3600
+  ttl: "5m"
 
 telemetry:
-  # endpoint вашего OTLP-коллектора
-  otel_collector: "otel-collector:4317"
+  otel_endpoint: "otel-collector:4317"
+  insecure: false
+
+logging:
+  level: "info"
+  dev_mode: false
+
+http:
+  port: 8090
