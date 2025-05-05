@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/backoff"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/pkg/backoff"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/pkg/logger"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
