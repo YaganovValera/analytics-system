@@ -11,46 +11,42 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+	"go.uber.org/zap"
 
 	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/marketdata"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var tracer = otel.Tracer("processor")
 
-// Topics хранит имена топиков Kafka.
+// Topics holds Kafka topic names.
 type Topics struct {
 	RawTopic       string
 	OrderBookTopic string
 }
 
-// processorImpl — приватная реализация Processor.
-type processorImpl struct {
-	producer kafka.Producer
+// Processor parses raw Binance messages and publishes protobufs to Kafka.
+type Processor struct {
+	producer *kafka.Producer
 	topics   Topics
 	log      *logger.Logger
 }
 
-// New создаёт Processor и возвращает его как интерфейс.
-func New(
-	producer kafka.Producer,
-	topics Topics,
-	log *logger.Logger,
-) Processor {
-	return &processorImpl{
+// New constructs a Processor with its dependencies.
+func New(producer *kafka.Producer, topics Topics, log *logger.Logger) *Processor {
+	return &Processor{
 		producer: producer,
 		topics:   topics,
 		log:      log.Named("processor"),
 	}
 }
 
-// Process маршрутизирует событие raw по типу.
-func (p *processorImpl) Process(ctx context.Context, raw binance.RawMessage) error {
+// Process routes the incoming RawMessage to the appropriate handler.
+func (p *Processor) Process(ctx context.Context, raw binance.RawMessage) error {
 	ctx, span := tracer.Start(ctx, "Process",
 		trace.WithAttributes(attribute.String("event.type", raw.Type)))
 	defer span.End()
@@ -71,7 +67,7 @@ func (p *processorImpl) Process(ctx context.Context, raw binance.RawMessage) err
 	}
 }
 
-func (p *processorImpl) handleTrade(ctx context.Context, data []byte, start time.Time) error {
+func (p *Processor) handleTrade(ctx context.Context, data []byte, start time.Time) error {
 	ctx, span := tracer.Start(ctx, "HandleTrade")
 	defer span.End()
 
@@ -80,7 +76,7 @@ func (p *processorImpl) handleTrade(ctx context.Context, data []byte, start time
 		metrics.ParseErrors.Inc()
 		p.log.WithContext(ctx).Error("parse trade failed", zap.Error(err))
 		span.RecordError(err)
-		return nil
+		return nil // skip invalid message
 	}
 
 	msg := &marketdatapb.MarketData{
@@ -147,7 +143,7 @@ func parseTrade(data []byte) (*tradeEvent, error) {
 	}, nil
 }
 
-func (p *processorImpl) handleDepth(ctx context.Context, data []byte, start time.Time) error {
+func (p *Processor) handleDepth(ctx context.Context, data []byte, start time.Time) error {
 	ctx, span := tracer.Start(ctx, "HandleDepth")
 	defer span.End()
 

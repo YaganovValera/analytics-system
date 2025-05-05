@@ -1,0 +1,7 @@
+.git
+infra/
+tmp/
+*.md
+*.log
+vendor/
+*.env

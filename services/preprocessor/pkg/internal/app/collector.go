@@ -19,10 +19,10 @@ import (
 
 // Run wires up and runs the collector service.
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	// 1) Регистрация метрик
+	// Регистрация метрик
 	metrics.Register(nil)
 
-	// 2) Инициализация OpenTelemetry
+	// 3) OpenTelemetry
 	shutdownOTel, err := telemetry.InitTracer(ctx, telemetry.Config{
 		Endpoint:       cfg.Telemetry.OTLPEndpoint,
 		ServiceName:    cfg.ServiceName,
@@ -34,26 +34,22 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer func() { _ = shutdownOTel(context.Background()) }()
 
-	// 3) Binance WS connector
+	// 5) Binance WS connector
 	wsConn, err := binance.NewConnector(binance.Config{
-		URL:              cfg.Binance.WSURL,
-		Streams:          cfg.Binance.Symbols,
-		ReadTimeout:      cfg.Binance.ReadTimeout,
-		SubscribeTimeout: cfg.Binance.SubscribeTimeout,
-		BackoffConfig:    cfg.Binance.Backoff,
+		URL:           cfg.Binance.WSURL,
+		Streams:       cfg.Binance.Symbols,
+		ReadTimeout:   cfg.Binance.ReadTimeout,
+		BackoffConfig: cfg.Binance.Backoff,
 	}, log)
 	if err != nil {
 		return fmt.Errorf("binance connector init: %w", err)
 	}
-	// Close WS on shutdown
-	defer wsConn.Close()
-
 	msgCh, err := wsConn.Stream(ctx)
 	if err != nil {
-		return fmt.Errorf("binance stream: %w", err)
+		return fmt.Errorf("ws stream: %w", err)
 	}
 
-	// 4) Kafka producer
+	// 6) Kafka producer
 	prod, err := kafka.NewProducer(ctx, kafka.Config{
 		Brokers:        cfg.Kafka.Brokers,
 		RequiredAcks:   cfg.Kafka.Acks,
@@ -66,10 +62,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("kafka producer init: %w", err)
 	}
-	// Close producer on shutdown
 	defer prod.Close()
 
-	// 5) Processor pipeline
+	// 7) Processor pipeline
 	proc := processor.New(
 		prod,
 		processor.Topics{
@@ -79,8 +74,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		log,
 	)
 
-	// 6) HTTP endpoints: /metrics, /healthz, /readyz
+	// 7) HTTP endpoints: /metrics, /healthz, /readyz
 	readiness := func() error {
+		// Проверяем доступность Kafka
 		if err := prod.Ping(); err != nil {
 			return fmt.Errorf("kafka not ready: %w", err)
 		}
@@ -94,7 +90,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	log.Info("collector: all components initialized, starting loops")
 
-	// 7) Run HTTP server and processing loop concurrently
+	// 8) Run HTTP server and processing loop concurrently
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -117,7 +113,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		}
 	})
 
-	// 8) Wait for either loop to exit
+	// 9) Wait for either loop to exit
 	err = g.Wait()
 	log.Sync()
 	return err

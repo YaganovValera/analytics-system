@@ -1,0 +1,19 @@
+# infra/monitoring/prometheus.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Существующий job для самого Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+
+  # Job для market-data-collector
+  - job_name: 'market_data_collector'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'market-data-collector:8080'

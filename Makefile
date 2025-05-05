@@ -1,21 +1,22 @@
 # Makefile
 
-# Каталог с proto-файлами
-PROTO_DIR    := proto/v1
-PROTO_FILES  := $(wildcard $(PROTO_DIR)/*.proto)
-
 # Перечень микросервисов (только имена папок под services/)
 GO_SERVICES  := market-data-collector preprocessor auth api-gateway analytics-api
 
-# --------------------------------------------------
-# Генерация Go-кода из .proto
+PROTO_DIR   := proto/v1
+PROTO_FILES := $(shell find $(PROTO_DIR) -name '*.proto')
+
 .PHONY: proto-gen
 proto-gen:
+	@echo "Generating Go code from proto files…"
 	protoc \
-		--proto_path=. \
-		--go_out=module=github.com/YaganovValera/analytics-system/proto/v1/generate,paths=import:./$(PROTO_DIR)/generate \
-		--go-grpc_out=module=github.com/YaganovValera/analytics-system/proto/v1/generate,paths=import:./$(PROTO_DIR)/generate \
+		-I$(PROTO_DIR) \
+		--go_out=paths=source_relative:$(PROTO_DIR) \
+		--go-grpc_out=paths=source_relative:$(PROTO_DIR) \
 		$(PROTO_FILES)
+
+
+
 # --------------------------------------------------
 # Сборка всех сервисов (зависит от proto-gen)
 .PHONY: build
