@@ -1,3 +1,4 @@
+// services/market-data-collector/internal/config/config.go
 package config
 
 import (
@@ -30,7 +31,7 @@ type BinanceConfig struct {
 	WSURL            string         `mapstructure:"ws_url"`
 	Symbols          []string       `mapstructure:"symbols"`
 	ReadTimeout      time.Duration  `mapstructure:"read_timeout"`
-	SubscribeTimeout time.Duration  `mapstructure:"subscribe_timeout"` // ← добавлено
+	SubscribeTimeout time.Duration  `mapstructure:"subscribe_timeout"`
 	Backoff          backoff.Config `mapstructure:"backoff"`
 }
 
@@ -47,20 +48,25 @@ type KafkaConfig struct {
 	Backoff        backoff.Config `mapstructure:"backoff"`
 }
 
-// Telemetry, Logging и HTTPConfig как было:
+// Telemetry хранит настройки OpenTelemetry.
 type Telemetry struct {
 	OTLPEndpoint string `mapstructure:"otel_endpoint"`
 	Insecure     bool   `mapstructure:"insecure"`
 }
+
+// Logging хранит настройки логгера.
 type Logging struct {
 	Level   string `mapstructure:"level"`
 	DevMode bool   `mapstructure:"dev_mode"`
 }
+
+// HTTPConfig хранит настройки HTTP-сервера.
 type HTTPConfig struct {
 	Port int `mapstructure:"port"`
 }
 
-// Load загружает и валидирует конфиг.
+// Load загружает и валидирует конфиг по указанному пути.
+// Если path пустой, читаются только defaults и ENV.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
@@ -70,7 +76,7 @@ func Load(path string) (*Config, error) {
 
 	v.SetDefault("binance.ws_url", "wss://stream.binance.com:9443/ws")
 	v.SetDefault("binance.read_timeout", "30s")
-	v.SetDefault("binance.subscribe_timeout", "5s") // ← добавлено
+	v.SetDefault("binance.subscribe_timeout", "5s")
 	v.SetDefault("binance.symbols", []string{"btcusdt@trade"})
 
 	v.SetDefault("kafka.acks", "all")
@@ -79,7 +85,10 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("kafka.flush_frequency", "0s")
 	v.SetDefault("kafka.flush_messages", 0)
 
+	// Default OTLP endpoint so Validate won't fail if not set by user
+	v.SetDefault("telemetry.otel_endpoint", "localhost:4317")
 	v.SetDefault("telemetry.insecure", false)
+
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.dev_mode", false)
 
@@ -94,7 +103,8 @@ func Load(path string) (*Config, error) {
 	if path != "" {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("read config %q: %w", path, err)
+			used := v.ConfigFileUsed()
+			return nil, fmt.Errorf("read config %q: %w", used, err)
 		}
 	}
 
@@ -129,7 +139,7 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Validate проверяет обязательные поля.
+// Validate проверяет обязательные поля и допустимые значения.
 func (c *Config) Validate() error {
 	// service
 	if c.ServiceName == "" {
@@ -194,7 +204,8 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Print выводит конфиг в формате JSON (для отладки).
+// Print выводит текущий конфиг в формате JSON.
+// Полезно для отладки в DevMode.
 func (c *Config) Print() {
 	b, _ := json.MarshalIndent(c, "", "  ")
 	fmt.Println("Loaded configuration:\n", string(b))

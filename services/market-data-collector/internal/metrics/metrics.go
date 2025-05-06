@@ -17,14 +17,16 @@ var (
 	PublishLatency    prometheus.Histogram
 )
 
-// Register initializes and registers all processor metrics exactly once.
-// If r is nil, it uses prometheus.DefaultRegisterer.
+// Register инициализирует и регистрирует все метрики процессора ровно один раз.
+// Если r == nil, используется prometheus.DefaultRegisterer.
+// Дублирующая регистрация игнорируется.
 func Register(r prometheus.Registerer) {
 	once.Do(func() {
 		if r == nil {
 			r = prometheus.DefaultRegisterer
 		}
 
+		// создаём все метрики
 		EventsTotal = prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "collector", Subsystem: "processor", Name: "events_total",
 			Help: "Total number of raw events processed",
@@ -51,13 +53,22 @@ func Register(r prometheus.Registerer) {
 			Buckets: prometheus.DefBuckets,
 		})
 
-		r.MustRegister(
+		// безопасно регистрируем, игнорируя AlreadyRegisteredError
+		collectors := []prometheus.Collector{
 			EventsTotal,
 			UnsupportedEvents,
 			ParseErrors,
 			SerializeErrors,
 			PublishErrors,
 			PublishLatency,
-		)
+		}
+		for _, c := range collectors {
+			if err := r.Register(c); err != nil {
+				// игнорируем попытку повторной регистрации
+				if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+					panic(err)
+				}
+			}
+		}
 	})
 }

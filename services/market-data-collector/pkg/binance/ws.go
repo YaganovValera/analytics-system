@@ -29,11 +29,11 @@ var (
 	})
 	wsConnectErrors = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "collector", Subsystem: "binance_ws", Name: "connect_errors_total",
-		Help: "Total WebSocket connection errors",
+		Help: "Total WebSocket connection errors on first try",
 	})
 	wsReconnects = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "collector", Subsystem: "binance_ws", Name: "reconnects_total",
-		Help: "Total WebSocket reconnections",
+		Help: "Total WebSocket reconnections after read-loop failures",
 	})
 	wsMessages = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "collector", Subsystem: "binance_ws", Name: "messages_received_total",
@@ -50,10 +50,6 @@ var (
 	wsPingErrors = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "collector", Subsystem: "binance_ws", Name: "ping_errors_total",
 		Help: "Total ping failures",
-	})
-	wsBufferDrops = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "collector", Subsystem: "binance_ws", Name: "buffer_drops_total",
-		Help: "Number of messages dropped because buffer was full",
 	})
 )
 
@@ -97,7 +93,6 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// binanceConnector — приватная реализация Connector.
 type binanceConnector struct {
 	cfg         Config
 	log         *logger.Logger
@@ -110,7 +105,6 @@ type binanceConnector struct {
 	closed atomic.Bool
 }
 
-// NewConnector создаёт Connector.
 func NewConnector(cfg Config, log *logger.Logger) (Connector, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
@@ -122,17 +116,14 @@ func NewConnector(cfg Config, log *logger.Logger) (Connector, error) {
 	}, nil
 }
 
-// Stream возвращает канал и запускает работу коннектора.
 func (c *binanceConnector) Stream(ctx context.Context) (<-chan RawMessage, error) {
 	ch := make(chan RawMessage, c.cfg.BufferSize)
 	go c.run(ctx, ch)
 	return ch, nil
 }
 
-// Close сразу закрывает текущее соединение и пинг-рутину.
 func (c *binanceConnector) Close() error {
 	c.closed.Store(true)
-
 	c.mu.Lock()
 	if c.cancelPing != nil {
 		c.cancelPing()
@@ -146,43 +137,42 @@ func (c *binanceConnector) Close() error {
 
 func (c *binanceConnector) run(ctx context.Context, ch chan<- RawMessage) {
 	defer close(ch)
-
 	for {
-		// 1) Выход, если ctx отменён или Close() вызван
+		// проверяем стоп-флаги
 		if ctx.Err() != nil || c.closed.Load() {
 			c.log.Info("ws: stopping run loop")
 			return
 		}
 
-		// 2) Подключение
+		// 1) Connect
 		wsConnects.Inc()
 		ctxConn, spanConn := tracer.Start(ctx, "WS.Connect",
 			trace.WithAttributes(attribute.String("url", c.cfg.URL)))
 		conn, err := c.connect(ctxConn)
 		spanConn.End()
-
 		if err != nil {
 			wsConnectErrors.Inc()
-			wsReconnects.Inc()
 			c.log.Error("ws: connect failed", zap.Error(err))
-			// после неудачного backoff (exhausted) прекращаем попытки
-			return
+			return // без инкремента reconnects: это первая попытка
 		}
 
-		// Сохраняем conn для Close()
 		c.mu.Lock()
 		c.conn = conn
 		c.mu.Unlock()
-
 		c.log.Info("ws: connected", zap.String("url", c.cfg.URL))
 
-		// 3) Ping
+		// 2) Pinger
 		cancelPing := c.startPinger(ctx, conn)
 		c.mu.Lock()
 		c.cancelPing = cancelPing
 		c.mu.Unlock()
 
-		// 4) Subscribe с retry
+		// 3) Subscribe с ретраями
+		if ctx.Err() != nil || c.closed.Load() {
+			cancelPing()
+			_ = conn.Close()
+			return
+		}
 		ctxSub, spanSub := tracer.Start(ctx, "WS.Subscribe")
 		err = backoff.Execute(ctxSub, c.cfg.BackoffConfig, c.log, func(ctx context.Context) error {
 			return c.subscribe(ctx, conn)
@@ -193,24 +183,22 @@ func (c *binanceConnector) run(ctx context.Context, ch chan<- RawMessage) {
 			c.log.Error("ws: subscribe failed", zap.Error(err))
 			cancelPing()
 			_ = conn.Close()
-			wsReconnects.Inc()
-			// после неудачных попыток подписки прекращаем работу
-			return
+			return // не инкрементим reconnects: подписка вовсе не удалась
 		}
 
-		// 5) ReadLoop
+		// 4) ReadLoop
 		ctxRead, spanRead := tracer.Start(ctx, "WS.ReadLoop")
 		if err := c.readLoop(ctxRead, conn, ch); err != nil {
 			wsReadErrors.Inc()
 			spanRead.RecordError(err)
 			c.log.Warn("ws: read loop error, reconnecting", zap.Error(err))
+			wsReconnects.Inc() // только здесь — реальное переподключение
 		}
 		spanRead.End()
 
 		// Cleanup перед новой итерацией
 		cancelPing()
 		_ = conn.Close()
-		wsReconnects.Inc()
 	}
 }
 
@@ -251,10 +239,8 @@ func (c *binanceConnector) startPinger(ctx context.Context, conn *websocket.Conn
 }
 
 func (c *binanceConnector) subscribe(ctx context.Context, conn *websocket.Conn) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	id := atomic.AddUint64(&c.subscribeID, 1)
 	req := map[string]interface{}{
@@ -268,8 +254,8 @@ func (c *binanceConnector) subscribe(ctx context.Context, conn *websocket.Conn) 
 
 func (c *binanceConnector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<- RawMessage) error {
 	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		_, bytes, err := conn.ReadMessage()
 		if err != nil {
@@ -295,9 +281,8 @@ func (c *binanceConnector) readLoop(ctx context.Context, conn *websocket.Conn, c
 
 		select {
 		case ch <- RawMessage{Data: env.Data, Type: msgType}:
-		default:
-			wsBufferDrops.Inc()
-			c.log.Warn("ws: buffer full, dropping message", zap.String("type", msgType))
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

@@ -1,3 +1,4 @@
+// services/market-data-collector/internal/http/server.go
 package http
 
 import (
@@ -50,25 +51,40 @@ func NewServer(addr string, checkReady ReadyChecker, log *logger.Logger) HTTPSer
 	}
 }
 
-// Start запускает HTTP-сервер и ждёт отмены ctx.
-// По отмене выполняется graceful shutdown с таймаутом 5 секунд.
+// Start запускает HTTP-сервер и блокирует до отмены ctx или фатальной ошибки запуска.
+// По отмене ctx выполняется graceful shutdown с таймаутом 5 секунд.
 func (s *Server) Start(ctx context.Context) error {
+	errCh := make(chan error, 1)
+
+	// Запускаем сервер в отдельной горутине и сразу ловим ошибки старта.
 	go func() {
 		s.log.Info("http: starting server", zap.String("addr", s.httpServer.Addr))
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.log.Error("http: server error", zap.Error(err))
+			errCh <- err
 		}
+		close(errCh)
 	}()
 
-	<-ctx.Done()
-	s.log.Info("http: shutdown signal received")
+	select {
+	case <-ctx.Done():
+		// инициируем shutdown
+		s.log.Info("http: shutdown signal received")
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("http server failed to start: %w", err)
+		}
+		// errCh закрыт без ошибки => сервер завершился некритично
+		return nil
+	}
 
+	// graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 		s.log.Error("http: graceful shutdown failed", zap.Error(err))
 		return err
 	}
+
 	s.log.Info("http: server stopped gracefully")
 	return nil
 }

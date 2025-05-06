@@ -95,7 +95,10 @@ func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFu
 	bo.MaxInterval = cfg.MaxInterval
 	if cfg.MaxElapsedTime > 0 {
 		bo.MaxElapsedTime = cfg.MaxElapsedTime
+	} else {
+		bo.MaxElapsedTime = backoff.Stop 
 	}
+	
 
 	// wrap with context
 	boCtx := backoff.WithContext(bo, ctx)

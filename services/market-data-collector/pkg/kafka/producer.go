@@ -43,6 +43,14 @@ var (
 		Help:    "Histogram of Kafka publish latency in seconds",
 		Buckets: prometheus.DefBuckets,
 	})
+	producerPingSuccess = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "kafka_producer", Name: "ping_success_total",
+		Help: "Total number of successful Kafka pings",
+	})
+	producerPingErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "kafka_producer", Name: "ping_errors_total",
+		Help: "Total number of failed Kafka pings",
+	})
 )
 
 var tracer = otel.Tracer("kafka-producer")
@@ -62,20 +70,25 @@ func (c *Config) applyDefaults() {
 	if c.Timeout <= 0 {
 		c.Timeout = 5 * time.Second
 	}
+	if c.RequiredAcks == "" {
+		c.RequiredAcks = "all"
+	}
+	if c.Compression == "" {
+		c.Compression = "none"
+	}
 }
 
 func (c *Config) validate() error {
 	if len(c.Brokers) == 0 {
 		return fmt.Errorf("kafka: brokers required")
 	}
-	// остальные в buildSaramaConfig
 	return nil
 }
 
 func buildSaramaConfig(c Config) (*sarama.Config, error) {
 	sc := sarama.NewConfig()
 	switch strings.ToLower(c.RequiredAcks) {
-	case "", "all":
+	case "all":
 		sc.Producer.RequiredAcks = sarama.WaitForAll
 	case "leader":
 		sc.Producer.RequiredAcks = sarama.WaitForLocal
@@ -96,7 +109,7 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 	}
 
 	switch strings.ToLower(c.Compression) {
-	case "", "none":
+	case "none":
 		sc.Producer.Compression = sarama.CompressionNone
 	case "gzip":
 		sc.Producer.Compression = sarama.CompressionGZIP
@@ -110,14 +123,12 @@ func buildSaramaConfig(c Config) (*sarama.Config, error) {
 		return nil, fmt.Errorf("kafka: invalid Compression %q", c.Compression)
 	}
 
-	// Идемпотентность для безопасных повторов
 	sc.Producer.Idempotent = true
 	sc.Net.MaxOpenRequests = 1
 
 	return sc, nil
 }
 
-// kafkaProducer — внутренняя реализация интерфейса Producer.
 type kafkaProducer struct {
 	prod       sarama.SyncProducer
 	client     sarama.Client
@@ -125,7 +136,6 @@ type kafkaProducer struct {
 	backoffCfg backoff.Config
 }
 
-// NewProducer создаёт и возвращает интерфейс Producer.
 func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (Producer, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
@@ -143,6 +153,7 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (Producer,
 		return nil, fmt.Errorf("kafka: new client: %w", err)
 	}
 
+	// при ошибке ниже обязательно закрываем client
 	var syncProd sarama.SyncProducer
 	connect := func(ctx context.Context) error {
 		producerConnectAttempts.Inc()
@@ -155,12 +166,12 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (Producer,
 		return nil
 	}
 
-	// Трассируем попытку подключения
-	ctx, span := tracer.Start(ctx, "Connect",
+	ctxConn, span := tracer.Start(ctx, "Connect",
 		trace.WithAttributes(attribute.StringSlice("brokers", cfg.Brokers)))
-	if err := backoff.Execute(ctx, cfg.Backoff, log, connect); err != nil {
+	if err := backoff.Execute(ctxConn, cfg.Backoff, log, connect); err != nil {
 		span.RecordError(err)
 		span.End()
+		client.Close()
 		log.Error("kafka: connect failed", zap.Error(err))
 		return nil, fmt.Errorf("kafka: NewProducer: %w", err)
 	}
@@ -177,9 +188,8 @@ func NewProducer(ctx context.Context, cfg Config, log *logger.Logger) (Producer,
 	}, nil
 }
 
-// Publish отправляет сообщение с retry, метриками и трассировкой.
 func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []byte) error {
-	ctx, span := tracer.Start(ctx, "Publish",
+	ctxPub, span := tracer.Start(ctx, "Publish",
 		trace.WithAttributes(attribute.String("topic", topic)))
 	start := time.Now()
 
@@ -193,7 +203,7 @@ func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []
 		return err
 	}
 
-	err := backoff.Execute(ctx, k.backoffCfg, k.logger, send)
+	err := backoff.Execute(ctxPub, k.backoffCfg, k.logger, send)
 	lat := time.Since(start).Seconds()
 	producerPublishLatency.Observe(lat)
 
@@ -213,21 +223,31 @@ func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []
 	return nil
 }
 
-// Ping проверяет доступность Kafka (refresh metadata).
 func (k *kafkaProducer) Ping() error {
-	return k.client.RefreshMetadata()
+	_, span := tracer.Start(context.Background(), "Ping")
+	err := k.client.RefreshMetadata()
+	if err != nil {
+		producerPingErrors.Inc()
+		span.RecordError(err)
+	} else {
+		producerPingSuccess.Inc()
+	}
+	span.End()
+	return err
 }
 
-// Close корректно закрывает продьюсер и клиент.
 func (k *kafkaProducer) Close() error {
-	if err := k.prod.Close(); err != nil {
-		k.logger.Error("kafka: producer close failed", zap.Error(err))
-		return err
+	errProd := k.prod.Close()
+	if errProd != nil {
+		k.logger.Error("kafka: producer close failed", zap.Error(errProd))
 	}
-	if err := k.client.Close(); err != nil {
-		k.logger.Error("kafka: client close failed", zap.Error(err))
-		return err
+	errClient := k.client.Close()
+	if errClient != nil {
+		k.logger.Error("kafka: client close failed", zap.Error(errClient))
 	}
 	k.logger.Info("kafka: producer closed")
-	return nil
+	if errProd != nil {
+		return errProd
+	}
+	return errClient
 }

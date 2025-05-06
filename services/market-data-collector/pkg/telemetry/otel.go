@@ -112,7 +112,6 @@ func newExporter(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error)
 	if cfg.Insecure {
 		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
-	// **Corrected:** New returns a SpanExporter interface, not a concrete *Exporter
 	return otlptracegrpc.New(ctx, opts...)
 }
 

@@ -8,6 +8,5 @@ import (
 
 // Processor определяет контракт на обработку сырых WS-сообщений.
 type Processor interface {
-	// Process разбирает одно сообщение и публикует результат в Kafka.
 	Process(ctx context.Context, raw binance.RawMessage) error
 }
