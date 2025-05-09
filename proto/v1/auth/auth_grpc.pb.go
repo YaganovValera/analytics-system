@@ -22,11 +22,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AuthService_Login_FullMethodName         = "/market.auth.AuthService/Login"
-	AuthService_ValidateToken_FullMethodName = "/market.auth.AuthService/ValidateToken"
-	AuthService_RefreshToken_FullMethodName  = "/market.auth.AuthService/RefreshToken"
-	AuthService_Logout_FullMethodName        = "/market.auth.AuthService/Logout"
-	AuthService_RevokeToken_FullMethodName   = "/market.auth.AuthService/RevokeToken"
+	AuthService_Login_FullMethodName         = "/market.auth.v1.AuthService/Login"
+	AuthService_ValidateToken_FullMethodName = "/market.auth.v1.AuthService/ValidateToken"
+	AuthService_RefreshToken_FullMethodName  = "/market.auth.v1.AuthService/RefreshToken"
+	AuthService_Logout_FullMethodName        = "/market.auth.v1.AuthService/Logout"
+	AuthService_RevokeToken_FullMethodName   = "/market.auth.v1.AuthService/RevokeToken"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -251,7 +251,7 @@ func _AuthService_RevokeToken_Handler(srv interface{}, ctx context.Context, dec 
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AuthService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "market.auth.AuthService",
+	ServiceName: "market.auth.v1.AuthService",
 	HandlerType: (*AuthServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

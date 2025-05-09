@@ -1,30 +1,25 @@
-// proto/v1/common.proto
+// proto/v1/common/common.proto
 syntax = "proto3";
 
-package market.common;
-
+package market.common.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/v1/common;commonpb";
+
+import "google/protobuf/empty.proto";
 
 // ErrorCode defines standard error codes for streaming operations.
 enum ErrorCode {
-  // No error.
   OK = 0;
-  // Service unavailable.
   UNAVAILABLE = 1;
-  // Internal server error.
   INTERNAL = 2;
-  // Operation timed out.
   TIMEOUT = 3;
-  // Invalid argument provided.
   INVALID_ARGUMENT = 4;
-  // Unauthorized or unauthenticated.
   UNAUTHORIZED = 5;
 }
 
 // StreamError represents an error in a data stream.
 message StreamError {
-  ErrorCode code    = 1;
-  string    message = 2;
+  ErrorCode code = 1;
+  string message = 2;
 }
 
 // AggregationInterval specifies intervals for historical data aggregation.
@@ -37,3 +32,22 @@ enum AggregationInterval {
   AGG_INTERVAL_4_HOURS     = 5;
   AGG_INTERVAL_1_DAY       = 6;
 }
+
+// Pagination parameters for paginated requests.
+message Pagination {
+  int32 page_size   = 1;  // Maximum number of items to return
+  string page_token = 2;  // Token for the next page
+}
+
+// Response for symbol discovery.
+message ListSymbolsResponse {
+  repeated string symbols        = 1;  // Available trading symbols
+  string           next_page_token = 2;  // Token for next page of symbols
+}
+
+// CommonService provides discovery and utility methods.
+service CommonService {
+  // Lists available trading symbols with pagination.
+  rpc ListSymbols(google.protobuf.Empty) returns (ListSymbolsResponse);
+}
+

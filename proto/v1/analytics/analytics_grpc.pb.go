@@ -21,17 +21,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AnalyticsService_GetCandles_FullMethodName = "/market.analytics.AnalyticsService/GetCandles"
+	AnalyticsService_GetCandles_FullMethodName    = "/market.analytics.v1.AnalyticsService/GetCandles"
+	AnalyticsService_StreamCandles_FullMethodName = "/market.analytics.v1.AnalyticsService/StreamCandles"
 )
 
 // AnalyticsServiceClient is the client API for AnalyticsService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AnalyticsService provides historical candle data.
+// AnalyticsService provides historical and streaming candle data.
 type AnalyticsServiceClient interface {
-	// Streams candles between start and end at the given interval.
-	GetCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CandleEvent], error)
+	// Returns a page of historical candles matching the request.
+	GetCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (*GetCandlesResponse, error)
+	// Streams candles (with errors) for the requested range.
+	StreamCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CandleEvent], error)
 }
 
 type analyticsServiceClient struct {
@@ -42,9 +45,19 @@ func NewAnalyticsServiceClient(cc grpc.ClientConnInterface) AnalyticsServiceClie
 	return &analyticsServiceClient{cc}
 }
 
-func (c *analyticsServiceClient) GetCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CandleEvent], error) {
+func (c *analyticsServiceClient) GetCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (*GetCandlesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AnalyticsService_ServiceDesc.Streams[0], AnalyticsService_GetCandles_FullMethodName, cOpts...)
+	out := new(GetCandlesResponse)
+	err := c.cc.Invoke(ctx, AnalyticsService_GetCandles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *analyticsServiceClient) StreamCandles(ctx context.Context, in *GetCandlesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CandleEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AnalyticsService_ServiceDesc.Streams[0], AnalyticsService_StreamCandles_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,16 +72,18 @@ func (c *analyticsServiceClient) GetCandles(ctx context.Context, in *GetCandlesR
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AnalyticsService_GetCandlesClient = grpc.ServerStreamingClient[CandleEvent]
+type AnalyticsService_StreamCandlesClient = grpc.ServerStreamingClient[CandleEvent]
 
 // AnalyticsServiceServer is the server API for AnalyticsService service.
 // All implementations must embed UnimplementedAnalyticsServiceServer
 // for forward compatibility.
 //
-// AnalyticsService provides historical candle data.
+// AnalyticsService provides historical and streaming candle data.
 type AnalyticsServiceServer interface {
-	// Streams candles between start and end at the given interval.
-	GetCandles(*GetCandlesRequest, grpc.ServerStreamingServer[CandleEvent]) error
+	// Returns a page of historical candles matching the request.
+	GetCandles(context.Context, *GetCandlesRequest) (*GetCandlesResponse, error)
+	// Streams candles (with errors) for the requested range.
+	StreamCandles(*GetCandlesRequest, grpc.ServerStreamingServer[CandleEvent]) error
 	mustEmbedUnimplementedAnalyticsServiceServer()
 }
 
@@ -79,8 +94,11 @@ type AnalyticsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAnalyticsServiceServer struct{}
 
-func (UnimplementedAnalyticsServiceServer) GetCandles(*GetCandlesRequest, grpc.ServerStreamingServer[CandleEvent]) error {
-	return status.Errorf(codes.Unimplemented, "method GetCandles not implemented")
+func (UnimplementedAnalyticsServiceServer) GetCandles(context.Context, *GetCandlesRequest) (*GetCandlesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCandles not implemented")
+}
+func (UnimplementedAnalyticsServiceServer) StreamCandles(*GetCandlesRequest, grpc.ServerStreamingServer[CandleEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamCandles not implemented")
 }
 func (UnimplementedAnalyticsServiceServer) mustEmbedUnimplementedAnalyticsServiceServer() {}
 func (UnimplementedAnalyticsServiceServer) testEmbeddedByValue()                          {}
@@ -103,28 +121,51 @@ func RegisterAnalyticsServiceServer(s grpc.ServiceRegistrar, srv AnalyticsServic
 	s.RegisterService(&AnalyticsService_ServiceDesc, srv)
 }
 
-func _AnalyticsService_GetCandles_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _AnalyticsService_GetCandles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCandlesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AnalyticsServiceServer).GetCandles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AnalyticsService_GetCandles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AnalyticsServiceServer).GetCandles(ctx, req.(*GetCandlesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AnalyticsService_StreamCandles_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(GetCandlesRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(AnalyticsServiceServer).GetCandles(m, &grpc.GenericServerStream[GetCandlesRequest, CandleEvent]{ServerStream: stream})
+	return srv.(AnalyticsServiceServer).StreamCandles(m, &grpc.GenericServerStream[GetCandlesRequest, CandleEvent]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AnalyticsService_GetCandlesServer = grpc.ServerStreamingServer[CandleEvent]
+type AnalyticsService_StreamCandlesServer = grpc.ServerStreamingServer[CandleEvent]
 
 // AnalyticsService_ServiceDesc is the grpc.ServiceDesc for AnalyticsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AnalyticsService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "market.analytics.AnalyticsService",
+	ServiceName: "market.analytics.v1.AnalyticsService",
 	HandlerType: (*AnalyticsServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetCandles",
+			Handler:    _AnalyticsService_GetCandles_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "GetCandles",
-			Handler:       _AnalyticsService_GetCandles_Handler,
+			StreamName:    "StreamCandles",
+			Handler:       _AnalyticsService_StreamCandles_Handler,
 			ServerStreams: true,
 		},
 	},

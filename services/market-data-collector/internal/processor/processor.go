@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/YaganovValera/analytics-system/common/kafka"
+	"github.com/YaganovValera/analytics-system/common/logger"
+	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/marketdata"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
 
-	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/marketdata"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -23,25 +23,23 @@ import (
 
 var tracer = otel.Tracer("processor")
 
-// Topics хранит имена топиков Kafka.
+const (
+	EventTypeTrade       = "trade"
+	EventTypeDepthUpdate = "depthUpdate"
+)
+
 type Topics struct {
 	RawTopic       string
 	OrderBookTopic string
 }
 
-// processorImpl — приватная реализация Processor.
 type processorImpl struct {
 	producer kafka.Producer
 	topics   Topics
 	log      *logger.Logger
 }
 
-// New создаёт Processor и возвращает его как интерфейс.
-func New(
-	producer kafka.Producer,
-	topics Topics,
-	log *logger.Logger,
-) Processor {
+func New(producer kafka.Producer, topics Topics, log *logger.Logger) Processor {
 	return &processorImpl{
 		producer: producer,
 		topics:   topics,
@@ -49,20 +47,18 @@ func New(
 	}
 }
 
-// Process маршрутизирует событие raw по типу.
 func (p *processorImpl) Process(ctx context.Context, raw binance.RawMessage) error {
 	ctx, span := tracer.Start(ctx, "Process",
 		trace.WithAttributes(attribute.String("event.type", raw.Type)))
 	defer span.End()
 
 	metrics.EventsTotal.Inc()
-	start := time.Now()
 
 	switch raw.Type {
-	case "trade":
-		return p.handleTrade(ctx, raw.Data, start)
-	case "depthUpdate":
-		return p.handleDepth(ctx, raw.Data, start)
+	case EventTypeTrade:
+		return p.handleTrade(ctx, raw.Data)
+	case EventTypeDepthUpdate:
+		return p.handleDepth(ctx, raw.Data)
 	default:
 		metrics.UnsupportedEvents.Inc()
 		p.log.WithContext(ctx).Debug("unsupported event, skipping",
@@ -71,7 +67,7 @@ func (p *processorImpl) Process(ctx context.Context, raw binance.RawMessage) err
 	}
 }
 
-func (p *processorImpl) handleTrade(ctx context.Context, data []byte, start time.Time) error {
+func (p *processorImpl) handleTrade(ctx context.Context, data []byte) error {
 	ctx, span := tracer.Start(ctx, "HandleTrade")
 	defer span.End()
 
@@ -96,16 +92,54 @@ func (p *processorImpl) handleTrade(ctx context.Context, data []byte, start time
 		metrics.SerializeErrors.Inc()
 		p.log.WithContext(ctx).Error("marshal trade proto failed", zap.Error(err))
 		span.RecordError(err)
-		return nil
+		return err
 	}
 
+	start := time.Now()
 	if err := p.producer.Publish(ctx, p.topics.RawTopic, nil, payload); err != nil {
 		metrics.PublishErrors.Inc()
 		p.log.WithContext(ctx).Error("publish trade failed", zap.Error(err))
 		span.RecordError(err)
 		return err
 	}
+	metrics.PublishLatency.Observe(time.Since(start).Seconds())
+	return nil
+}
 
+func (p *processorImpl) handleDepth(ctx context.Context, data []byte) error {
+	ctx, span := tracer.Start(ctx, "HandleDepth")
+	defer span.End()
+
+	evt, err := parseDepth(data)
+	if err != nil {
+		metrics.ParseErrors.Inc()
+		p.log.WithContext(ctx).Error("parse depth failed", zap.Error(err))
+		span.RecordError(err)
+		return nil
+	}
+
+	msg := &marketdatapb.OrderBookSnapshot{
+		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
+		Symbol:    evt.Symbol,
+		Bids:      evt.Bids,
+		Asks:      evt.Asks,
+	}
+
+	payload, err := proto.Marshal(msg)
+	if err != nil {
+		metrics.SerializeErrors.Inc()
+		p.log.WithContext(ctx).Error("marshal depth proto failed", zap.Error(err))
+		span.RecordError(err)
+		return err
+	}
+
+	start := time.Now()
+	if err := p.producer.Publish(ctx, p.topics.OrderBookTopic, nil, payload); err != nil {
+		metrics.PublishErrors.Inc()
+		p.log.WithContext(ctx).Error("publish depth failed", zap.Error(err))
+		span.RecordError(err)
+		return err
+	}
 	metrics.PublishLatency.Observe(time.Since(start).Seconds())
 	return nil
 }
@@ -147,44 +181,6 @@ func parseTrade(data []byte) (*tradeEvent, error) {
 	}, nil
 }
 
-func (p *processorImpl) handleDepth(ctx context.Context, data []byte, start time.Time) error {
-	ctx, span := tracer.Start(ctx, "HandleDepth")
-	defer span.End()
-
-	evt, err := parseDepth(data)
-	if err != nil {
-		metrics.ParseErrors.Inc()
-		p.log.WithContext(ctx).Error("parse depth failed", zap.Error(err))
-		span.RecordError(err)
-		return nil
-	}
-
-	msg := &marketdatapb.OrderBookSnapshot{
-		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
-		Symbol:    evt.Symbol,
-		Bids:      evt.Bids,
-		Asks:      evt.Asks,
-	}
-
-	payload, err := proto.Marshal(msg)
-	if err != nil {
-		metrics.SerializeErrors.Inc()
-		p.log.WithContext(ctx).Error("marshal depth proto failed", zap.Error(err))
-		span.RecordError(err)
-		return nil
-	}
-
-	if err := p.producer.Publish(ctx, p.topics.OrderBookTopic, nil, payload); err != nil {
-		metrics.PublishErrors.Inc()
-		p.log.WithContext(ctx).Error("publish depth failed", zap.Error(err))
-		span.RecordError(err)
-		return err
-	}
-
-	metrics.PublishLatency.Observe(time.Since(start).Seconds())
-	return nil
-}
-
 type depthEvent struct {
 	EventTime int64
 	Symbol    string
@@ -204,7 +200,11 @@ func parseDepth(data []byte) (*depthEvent, error) {
 		return nil, err
 	}
 
+	// внутри parseDepth
 	convert := func(pair []string) (*marketdatapb.OrderBookLevel, error) {
+		if len(pair) < 2 {
+			return nil, fmt.Errorf("malformed price-level: %v", pair)
+		}
 		price, err := strconv.ParseFloat(pair[0], 64)
 		if err != nil {
 			return nil, fmt.Errorf("price=%q: %w", pair[0], err)

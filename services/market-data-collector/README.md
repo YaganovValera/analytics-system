@@ -1,120 +1,110 @@
 # Market Data Collector
 
-**Service:** `market-data-collector`  
-**Purpose:** Подписка на Binance WebSocket, преобразование событий в Protobuf, публикация в Kafka, экспонирование метрик и трассировок.
+`market-data-collector` — высоконагруженный Go-микросервис для сбора рыночных данных с Binance WebSocket, преобразования их в Protobuf и доставки в Kafka с гарантией доставки, мониторингом и трассировкой.
 
 ---
 
-## 🚀 Цель проекта
+## Ключевые возможности
 
-Построить надёжную, масштабируемую микросервисную платформу для анализа рыночных данных в реальном времени:
-1. Подключение к биржевым WS (Binance).
-2. Обработка потоковых данных (агрегация OHLC, order book, скользящие средние).
-3. Публикация сырых и агрегированных данных в Kafka.
-4. Кеширование в Redis (когда потребуется), хранение истории в PostgreSQL (в будущем).
-5. API (gRPC/REST) для исторических и текущих метрик.
-6. Production-ready практики: liveness/readiness, метрики, трассировки, конфигурируемость, контейнеризация и оркестрация.
-
----
-
-## 📦 Технологический стек
-
-- Go 1.23  
-- gRPC + Protobuf v3  
-- REST (health/metrics)  
-- Apache Kafka (Sarama + Otelsarama)  
-- Redis (будет для кешей)  
-- Viper + pflag + mapstructure (конфиг)  
-- Zap (логирование)  
-- cenkalti/backoff (retry)  
-- Gorilla WebSocket  
-- Prometheus (client_golang)  
-- OpenTelemetry OTLP → Jaeger (tracing)  
-- Docker / Docker Compose / Kubernetes (Helm)  
-
----
-
-## 📂 Структура сервиса
-
-services/market-data-collector/
-├── cmd/collector/main.go # точка входа
-├── config/config.yaml # пример конфига
-├── Dockerfile # multi-stage сборка
-├── proto/v1/{analytics,auth,common,marketdata}/*.proto
-├── internal/
-│ ├── app/collector.go # Run()
-│ ├── config/config.go # Load/Validate/Print
-│ ├── http/server.go # /metrics, /healthz, /readyz
-│ ├── metrics/metrics.go # Prometheus метрики
-│ └── processor/processor.go # JSON→Protobuf, Kafka publish
-└── pkg/
-├── logger/logger.go # zap-wrapper
-├── telemetry/otel.go # InitTracer OTLP
-├── backoff/backoff.go # retry + metrics
-├── kafka/producer.go # SyncProducer + Ping()
-└── binance/ws.go # WS connector + backoff
-
+- **Подписка на Binance WebSocket**  
+  - Типы потоков: сделки (`trade`) и обновления стакана (`depthUpdate`).
+- **Парсинг и сериализация**  
+  - JSON → Go → Protobuf (`MarketData` и `OrderBookSnapshot`).
+- **Публикация в Kafka**  
+  - Топики: `raw` (сделки) и `orderbook` (стакан).  
+  - Экспоненциальный backoff, ретраи и метрики публикаций.
+- **Self-healing**  
+  - Автоматический рестарт WS-коннектора при сбоях или закрытии канала.
+- **Backpressure**  
+  - Блокирующая отправка в буфер, чтобы не терять сообщения при замедленном потреблении.
+- **Наблюдаемость**  
+  - **Prometheus**: метрики входящих событий, ошибок парсинга/сериализации, задержек публикаций.  
+  - **OpenTelemetry**: spans вокруг ключевых операций (connect, subscribe, readLoop, Process, Publish).  
+  - **Логи**: структурированные Zap-логи с trace/request IDs.
+- **HTTP-эндпоинты**  
+  - `/metrics` — Prometheus handler  
+  - `/healthz` — всегда `200 OK`  
+  - `/readyz` — проверка доступности Kafka (Ping)
+- **Graceful shutdown**  
+  - Обработка SIGINT/SIGTERM: корректное завершение WS, Kafka-продьюсера и OTLP-экспортёра.
+- **Конфигурация**  
+  - YAML + ENV (Viper + Mapstructure), sane defaults, валидация.
 
 ---
 
-## ✅ Что сделано
+## Структура репозитория
 
-1. **Конфигурация**  
-   - `internal/config` с Viper/ENV/флагами.  
-   - Настроены секции: Binance WS, Kafka, Telemetry, Logging, HTTP.
-
-2. **Логирование**  
-   - `pkg/logger` на Zap, поддержка контекста (trace_id, request_id).
-
-3. **Трассировки**  
-   - `pkg/telemetry.InitTracer` → OTLP-Collector → Jaeger.  
-   - Спаны для WS, Processor, Kafka.
-
-4. **Retry / Backoff**  
-   - `pkg/backoff` с экспоненциальным backoff, jitter, метрики (retries, failures, successes, delay).
-
-5. **Kafka Producer**  
-   - `pkg/kafka.NewProducer` с Sarama SyncProducer, обёрткой OTEL, `Ping()` для readiness.
-
-6. **Binance WS Connector**  
-   - `pkg/binance.Connector`: auto-reconnect, ping/pong, backoff, buffer, метрики (connects, drops).
-
-7. **Processor**  
-   - `internal/processor.Process`: парсинг trade и depthUpdate, Protobuf, `producer.Publish`, метрики (events, errors, latency).
-
-8. **Метрики Prometheus**  
-   - Счётчики и гистограммы в `internal/metrics`.  
-   - `/metrics` endpoint через `promhttp`.
-
-9. **HTTP-сервер**  
-   - `/healthz` (liveness), `/readyz` (readiness проверяет Kafka via `Ping()`), `/metrics`.
-
-10. **Инструментирование**  
-    - Prometheus: `infra/monitoring/prometheus.yml` подхватывает `/metrics`.  
-    - Grafana: дашборд вручную создан/импортирован.  
-    - OpenTelemetry: Collector конфиг `–config/otel-collector-config.yaml`, Jaeger в Docker Compose.
-
-11. **Контейнеризация**  
-    - Multi-stage Dockerfile, non-root user, healthcheck, env-vars.  
-    - Docker Compose: Zookeeper, Kafka, OTEL-Collector, Jaeger, Prometheus, Grafana, market-data-collector.
+```
+.
+├── cmd/collector       # Основной binary
+│   └── main.go
+├── config              # Пример конфигурации
+│   └── config.yaml
+├── internal
+│   ├── app             # Wiring и главный Run()
+│   ├── config          # Загрузка и валидация конфига
+│   ├── http            # HTTP-сервис (metrics, healthz, readyz)
+│   ├── metrics         # Prometheus-метрики
+│   └── processor       # Обработка и маршрутизация событий
+├── pkg
+│   ├── backoff         # Экспоненциальный retry с метриками
+│   ├── binance         # WS-коннектор с self-healing и backpressure
+│   ├── kafka           # Kafka-продьюсер с retry, метриками и OTEL
+│   ├── logger          # Zap-логгер с Dev/Prod режимами, context-fields
+│   └── telemetry       # OpenTelemetry InitTracer + shutdown
+├── proto               # Protobuf определения & Go-pkg
+├── Dockerfile
+└── README.md
+```
 
 ---
 
-## 🛑 Текущий статус и где остановились
+## Быстрый старт
 
-- **Бизнес-логика**: полностью реализована и протестирована.  
-- **Metrics & Tracing**: сбор метрик и спанов настроен, Grafana и Jaeger работают.  
-- **Readiness/Liveness**: `/readyz` проверяет Kafka; WebSocket и Collector-health можно добавить позже.  
-- **Отказоустойчивость**: осталось протестировать сценарии падения (Kafka, WS, Collector) и доработать readiness для них.
+### 1. Клонировать репозиторий
+
+```bash
+git clone https://github.com/YaganovValera/analytics-system.git
+cd analytics-system/services/market-data-collector
+```
+
+### 2. Настроить конфигурацию
+
+Скопируйте `config/config.yaml` и измените по необходимости.
+
+### 3. Сборка и запуск
+
+```bash
+go build -o bin/collector ./cmd/collector
+./bin/collector --config config/config.yaml
+```
+
+Или с Docker:
+
+```bash
+docker build -t market-data-collector:latest .
+docker run -d   -v $(pwd)/config:/app/config   -p 8080:8080   -e COLLECTOR_KAFKA_BROKERS="kafka:9092"   market-data-collector:latest
+```
 
 ---
 
-## 📋 Следующие шаги
+## Мониторинг и трассировка
 
-1. **Тест отказоустойчивости** и доработка readiness для WS/Collector.  
-2. **Перейти к сервису `preprocessor`**, копируя и адаптируя текущие best-practices.  
-3. **Добавить PostgreSQL** в будущем, когда потребуется история.  
+- **Prometheus**: собирайте метрики с `/metrics`.  
+- **Liveness**: `/healthz` → `200 OK`.  
+- **Readiness**: `/readyz` → `200 OK` только если Kafka доступен.  
+- **OpenTelemetry**: экспорт трассировок в OTLP-консьюмер (`cfg.Telemetry.OTLPEndpoint`).
 
 ---
 
-> _Этот README поможет быстро вспомнить, что уже сделано в `market-data-collector` и на каком этапе мы остановились перед разработкой следующего сервиса._
+## CI/CD рекомендации
+
+1. **Lint & Vet**: `go vet ./...`, `golangci-lint run`.  
+2. **Unit & Integration tests**: `go test -cover ./...`.  
+3. **Build & Push**: сборка Docker-образа, публикация в registry.
+
+---
+
+## Лицензия
+
+MIT © YaganovValera

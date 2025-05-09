@@ -1,40 +1,78 @@
-service_name: "market-data-collector"
+# ------------------------------------------------------------------------------
+#  Market-Data-Collector — основной конфигурационный файл
+# ------------------------------------------------------------------------------
+
+service_name:    "market-data-collector"
 service_version: "v1.0.0"
 
+# ------------------------------------------------------------------------------
+#  Binance WebSocket
+# ------------------------------------------------------------------------------
 binance:
   ws_url: "wss://stream.binance.com:9443/ws"
+
+  # Список подписок; поддерживаются trade / depth / kline и т.д.
   symbols:
     - "btcusdt@trade"
     - "ethusdt@depth"
-  read_timeout: "30s"
-  subscribe_timeout: "5s"         # ← добавлено
-  backoff:
-    initial_interval: "1s"
-    max_interval: "30s"
-    max_elapsed_time: "5m"
 
+  # Таймауты и стратегия back-off
+  read_timeout:       "30s"   # без pong → разрыв соединения
+  subscribe_timeout:  "5s"    # ожидание ответа SUBSCRIBE
+  backoff:
+    initial_interval:  "1s"
+    max_interval:      "30s"
+    max_elapsed_time:  "5m"
+    # остальные поля (randomization_factor, multiplier) идут по дефолту
+
+# ------------------------------------------------------------------------------
+#  Kafka Producer
+# ------------------------------------------------------------------------------
 kafka:
   brokers:
     - "kafka:9092"
-  raw_topic: "marketdata.raw"
-  orderbook_topic: "marketdata.orderbook"
-  timeout: "15s"
-  acks: "all"
-  compression: "none"
-  flush_frequency: "0s"
-  flush_messages: 0
-  backoff:
-    initial_interval: "1s"
-    max_interval: "30s"
-    max_elapsed_time: "5m"
 
+  raw_topic:        "marketdata.raw"
+  orderbook_topic:  "marketdata.orderbook"
+
+  timeout:          "15s"
+  acks:             "all"      # all | leader | none
+  compression:      "none"     # none | gzip | snappy | lz4 | zstd
+  flush_frequency:  "0s"       # 0 → disable
+  flush_messages:   0          # 0 → disable
+
+  backoff:
+    initial_interval:  "1s"
+    max_interval:      "30s"
+    max_elapsed_time:  "5m"
+
+# ------------------------------------------------------------------------------
+#  OpenTelemetry
+# ------------------------------------------------------------------------------
 telemetry:
   otel_endpoint: "otel-collector:4317"
-  insecure: false
+  insecure:      false          # true → gRPC без TLS
 
+# ------------------------------------------------------------------------------
+#  Логирование
+# ------------------------------------------------------------------------------
 logging:
-  level: "info"
-  dev_mode: false
+  level:    "info"              # debug | info | warn | error
+  dev_mode: false               # true → человекочитаемый вывод
 
+# ------------------------------------------------------------------------------
+#  Встроенный HTTP/metrics-сервер
+# ------------------------------------------------------------------------------
 http:
-  port: 8080                     # ← порт теперь просто port
+  port:              8080
+
+  # Таймауты (подхватываются в common/httpserver.Config)
+  read_timeout:      "10s"
+  write_timeout:     "15s"
+  idle_timeout:      "60s"
+  shutdown_timeout:  "5s"
+
+  # Пользовательские пути — меняйте при необходимости
+  metrics_path:  "/metrics"
+  healthz_path:  "/healthz"
+  readyz_path:   "/readyz"
