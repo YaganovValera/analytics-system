@@ -1,11 +1,11 @@
 // proto/v1/auth.proto
 syntax = "proto3";
 
-package market.auth;
-
+package market.auth.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/v1/auth;authpb";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 // LoginRequest is the request for user authentication.
 message LoginRequest {
@@ -17,7 +17,7 @@ message LoginRequest {
 message LoginResponse {
   string access_token  = 1;
   string refresh_token = 2;
-  int64  expires_in     = 3; // seconds
+  int64  expires_in     = 3; // seconds until expiry
 }
 
 // ValidateTokenRequest checks an access token's validity.
@@ -25,11 +25,12 @@ message ValidateTokenRequest {
   string token = 1;
 }
 
-// ValidateTokenResponse indicates token validity and metadata.
+// ValidateTokenResponse indicates token validity, metadata, and expiry.
 message ValidateTokenResponse {
-  bool   valid    = 1;
-  string username = 2;
-  repeated string roles    = 3;
+  bool                      valid      = 1;
+  string                    username   = 2;
+  repeated string           roles      = 3;
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 // RefreshTokenRequest requests new tokens.
