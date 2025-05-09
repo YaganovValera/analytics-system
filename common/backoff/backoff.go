@@ -1,4 +1,5 @@
 // common/backoff/backoff.go
+
 package backoff
 
 import (
@@ -6,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
+	cbackoff "github.com/cenkalti/backoff/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
@@ -60,7 +61,7 @@ var (
 )
 
 // SetServiceLabel must be called once from common.InitServiceName(..)
-// before the first Execute(..).  See common/service.go.
+// before the first Execute(..).
 func SetServiceLabel(name string) { serviceLabel = name }
 
 // -----------------------------------------------------------------------------
@@ -68,33 +69,15 @@ func SetServiceLabel(name string) { serviceLabel = name }
 // -----------------------------------------------------------------------------
 
 // Config contains tunables for exponential back-off.
-//
-// All zero values are treated as “use reasonable default”.
 type Config struct {
-	// InitialInterval is the first delay before retrying.
-	InitialInterval time.Duration
-
-	// RandomizationFactor adds ±jitter to each delay.
-	// Accepted range: 0.0 ≤ f ≤ 1.0
+	InitialInterval     time.Duration
 	RandomizationFactor float64
-
-	// Multiplier multiplies the previous delay to get the next one
-	// ( e.g. 2 → doubles on every retry ).
-	Multiplier float64
-
-	// MaxInterval caps each individual delay.
-	MaxInterval time.Duration
-
-	// MaxElapsedTime is the total time allowed for all retries
-	// before giving up.  Zero → unlimited.
-	MaxElapsedTime time.Duration
-
-	// PerAttemptTimeout limits the execution time of every single
-	// user function call.  Zero → no per-attempt timeout.
-	PerAttemptTimeout time.Duration
+	Multiplier          float64
+	MaxInterval         time.Duration
+	MaxElapsedTime      time.Duration
+	PerAttemptTimeout   time.Duration
 }
 
-// applyDefaults fills cfg with safe defaults in-place.
 func (c *Config) applyDefaults() {
 	if c.InitialInterval <= 0 {
 		c.InitialInterval = time.Second
@@ -110,7 +93,6 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// validate performs cheap sanity checks.
 func (c Config) validate() error {
 	if c.RandomizationFactor < 0 || c.RandomizationFactor > 1 {
 		return fmt.Errorf("backoff: RandomizationFactor must be in [0,1]")
@@ -118,59 +100,49 @@ func (c Config) validate() error {
 	if c.Multiplier < 1 {
 		return fmt.Errorf("backoff: Multiplier must be ≥ 1")
 	}
+	if c.PerAttemptTimeout < 0 {
+		return fmt.Errorf("backoff: PerAttemptTimeout must be ≥ 0")
+	}
 	return nil
 }
 
-// RetryableFunc is a unit of work that may be re-executed until it
-// succeeds or the back-off strategy gives up.
+// RetryableFunc is a unit of work that may be re-executed until it succeeds or the back-off strategy gives up.
 type RetryableFunc func(ctx context.Context) error
 
-// -----------------------------------------------------------------------------
-// Errors
-// -----------------------------------------------------------------------------
-
-// ErrMaxRetries is returned from Execute(..) when the function was still
-// failing after all retries were exhausted.
+// ErrMaxRetries is returned when all retry attempts fail.
 type ErrMaxRetries struct {
-	Err      error // last error returned by fn
-	Attempts int   // number of attempts performed
+	Err      error
+	Attempts int
 }
 
 func (e *ErrMaxRetries) Error() string {
 	return fmt.Sprintf("backoff: %d attempt(s) failed: %v", e.Attempts, e.Err)
 }
 func (e *ErrMaxRetries) Unwrap() error { return e.Err }
+func Permanent(err error) error        { return cbackoff.Permanent(err) }
 
-// Permanent marks an error as non-retryable.
-func Permanent(err error) error { return backoff.Permanent(err) }
-
-// -----------------------------------------------------------------------------
-// Core
-// -----------------------------------------------------------------------------
-
-// Execute runs fn() with an exponential back-off defined by cfg, emitting
-// Prometheus metrics and structured logs via log.
+// Execute runs fn() with exponential back-off, emitting Prometheus metrics and structured logs.
 func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFunc) error {
-	// Prepare configuration.
+	// Warn if service label was not set.
+	if serviceLabel == "unknown" {
+		log.Error("backoff: service label not set — call SetServiceLabel once at startup")
+	}
+
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return fmt.Errorf("backoff: invalid config: %w", err)
 	}
 
-	// Build strategy.
-	bo := backoff.NewExponentialBackOff()
+	bo := cbackoff.NewExponentialBackOff()
 	bo.InitialInterval = cfg.InitialInterval
 	bo.RandomizationFactor = cfg.RandomizationFactor
 	bo.Multiplier = cfg.Multiplier
 	bo.MaxInterval = cfg.MaxInterval
 	if cfg.MaxElapsedTime > 0 {
 		bo.MaxElapsedTime = cfg.MaxElapsedTime
-	} else {
-		bo.MaxElapsedTime = backoff.Stop
 	}
-	boCtx := backoff.WithContext(bo, ctx)
+	boCtx := cbackoff.WithContext(bo, ctx)
 
-	// Instrumented execution.
 	attempts := 0
 	operation := func() error {
 		attempts++
@@ -191,7 +163,7 @@ func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFu
 		)
 	}
 
-	if err := backoff.RetryNotify(operation, boCtx, notify); err != nil {
+	if err := cbackoff.RetryNotify(operation, boCtx, notify); err != nil {
 		metrics.Failures.WithLabelValues(serviceLabel).Inc()
 		log.Error("back-off give-up",
 			zap.Int("attempts", attempts),

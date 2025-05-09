@@ -122,7 +122,7 @@ func (r *redisStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	op := func(ctx context.Context) error {
 		val, err := r.client.Get(ctx, key).Bytes()
 		if err == redis.Nil {
-			return ErrNotFound
+			return backoff.Permanent(ErrNotFound)
 		}
 		if err != nil {
 			return err

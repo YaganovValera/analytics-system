@@ -1,4 +1,5 @@
 // common/httpserver/server.go
+
 package httpserver
 
 import (
@@ -13,35 +14,26 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
 
-// -----------------------------------------------------------------------------
-// API
-// -----------------------------------------------------------------------------
-
-// ReadyChecker возвращает nil, если сервис готов обслуживать запросы.
+// ReadyChecker returns nil if the service is ready to serve.
 type ReadyChecker func() error
 
-// HTTPServer — обобщённый контракт запуска/остановки HTTP-сервера.
+// HTTPServer defines Start(context) error.
 type HTTPServer interface {
-	// Start блокирующе запускает сервер и реагирует на ctx.Done().
-	// Метод возвращает ошибку старта ListenAndServe или ctx.Err().
 	Start(ctx context.Context) error
 }
 
-// Config определяет все таймауты и адрес для HTTP-сервера.
-//
-// Нулевые значения заменяются дефолтами в applyDefaults().
+// Config defines timeouts and paths for the HTTP server.
 type Config struct {
-	Addr            string        // адрес в формате ":8080"
-	ReadTimeout     time.Duration // максимум чтения полного запроса
-	WriteTimeout    time.Duration // максимум записи ответа
-	IdleTimeout     time.Duration // keep-alive idle
-	ShutdownTimeout time.Duration // время на graceful-shutdown
-	MetricsPath     string        // endpoint для Prometheus; "" → /metrics
-	HealthzPath     string        // endpoint для liveness; "" → /healthz
-	ReadyzPath      string        // endpoint для readiness; "" → /readyz
+	Addr            string // e.g. ":8080"
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+	MetricsPath     string
+	HealthzPath     string
+	ReadyzPath      string
 }
 
-// applyDefaults проставляет безопасные дефолты.
 func (c *Config) applyDefaults() {
 	if c.ReadTimeout <= 0 {
 		c.ReadTimeout = 10 * time.Second
@@ -66,17 +58,12 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// validate гарантирует обязательные поля.
 func (c Config) validate() error {
 	if c.Addr == "" {
 		return fmt.Errorf("httpserver: Addr is required")
 	}
 	return nil
 }
-
-// -----------------------------------------------------------------------------
-// Реализация
-// -----------------------------------------------------------------------------
 
 type server struct {
 	httpServer      *http.Server
@@ -85,7 +72,7 @@ type server struct {
 	log             *logger.Logger
 }
 
-// New конструирует HTTP-сервер со всеми таймаутами и сервис-эндпоинтами.
+// New constructs an HTTPServer with metrics and health endpoints.
 func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
@@ -124,7 +111,7 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error)
 	}, nil
 }
 
-// Start запускает ListenAndServe и дожидается завершения ctx или ошибки запуска.
+// Start runs ListenAndServe and gracefully shuts down on ctx.Done().
 func (s *server) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
@@ -136,16 +123,15 @@ func (s *server) Start(ctx context.Context) error {
 		close(errCh)
 	}()
 
-	// Ожидание контекста или ошибки старта
 	var serveErr error
 	select {
 	case <-ctx.Done():
 		s.log.Info("http: shutdown signal received")
+		serveErr = ctx.Err()
 	case err := <-errCh:
 		serveErr = err
 	}
 
-	// Всегда пытаемся graceful-shutdown с корректным таймаутом
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
 
@@ -155,7 +141,6 @@ func (s *server) Start(ctx context.Context) error {
 	}
 	s.log.Info("http: server stopped gracefully")
 
-	// Flush буферы zap
 	s.log.Sync()
 	return serveErr
 }

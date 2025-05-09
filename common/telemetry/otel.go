@@ -1,4 +1,5 @@
 // common/telemetry/otel.go
+
 package telemetry
 
 import (
@@ -21,20 +22,17 @@ import (
 // Configuration
 // -----------------------------------------------------------------------------
 
-// Config содержит параметры инициализации OpenTelemetry трассировки.
-//
-// Все нулевые значения (кроме обязательных) заменяются дефолтами в applyDefaults().
+// Config содержит параметры для инициализации OpenTelemetry.
 type Config struct {
-	Endpoint        string        // OTLP collector в формате "host:port" (обязательно)
-	ServiceName     string        // логическое имя сервиса (обязательно)
-	ServiceVersion  string        // версия build'а (обязательно)
+	Endpoint        string        // OTLP-collector "host:port" (обязательно)
+	ServiceName     string        // имя сервиса (обязательно)
+	ServiceVersion  string        // версия сборки (обязательно)
 	Insecure        bool          // true → gRPC без TLS
-	ReconnectPeriod time.Duration // период переподключения экспортёра
-	Timeout         time.Duration // таймаут на Init/Shutdown
+	ReconnectPeriod time.Duration // период ребута экспортёра
+	Timeout         time.Duration // таймаут Init/Shutdown
 	SamplerRatio    float64       // 0.0…1.0 — доля выборки span'ов
 }
 
-// applyDefaults заполняет безопасные дефолты.
 func applyDefaults(cfg *Config) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
@@ -42,12 +40,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.ReconnectPeriod <= 0 {
 		cfg.ReconnectPeriod = 5 * time.Second
 	}
-	if cfg.SamplerRatio <= 0 || cfg.SamplerRatio > 1 {
+	// Разрешаем SamplerRatio==0 (отключение трассинга)
+	if cfg.SamplerRatio < 0 || cfg.SamplerRatio > 1 {
 		cfg.SamplerRatio = 1
 	}
 }
 
-// validate проверяет обязательные поля.
 func validateConfig(cfg Config) error {
 	switch {
 	case cfg.Endpoint == "":
@@ -56,6 +54,8 @@ func validateConfig(cfg Config) error {
 		return fmt.Errorf("telemetry: service name is required")
 	case cfg.ServiceVersion == "":
 		return fmt.Errorf("telemetry: service version is required")
+	case cfg.SamplerRatio < 0 || cfg.SamplerRatio > 1:
+		return fmt.Errorf("telemetry: sampler ratio must be between 0.0 and 1.0, got %v", cfg.SamplerRatio)
 	default:
 		return nil
 	}
@@ -65,15 +65,14 @@ func validateConfig(cfg Config) error {
 // Public API
 // -----------------------------------------------------------------------------
 
-// InitTracer настраивает глобальный TracerProvider
-// и возвращает функцию Shutdown, которую следует вызвать при остановке сервиса.
+// InitTracer инициализирует глобальный TracerProvider.
+// Возвращает функцию Shutdown, которую нужно вызвать при остановке.
 func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(context.Context) error, error) {
 	applyDefaults(&cfg)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 
-	// Ограничиваем время создания экспортёра.
 	initCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
@@ -97,17 +96,18 @@ func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(conte
 
 	tp := newTracerProvider(exp, res, cfg)
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		),
+	)
 
 	log.Info("telemetry: initialized",
 		zap.String("service", cfg.ServiceName),
 		zap.String("version", cfg.ServiceVersion),
 	)
 
-	// Функция завершения для main().
 	shutdown := func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
