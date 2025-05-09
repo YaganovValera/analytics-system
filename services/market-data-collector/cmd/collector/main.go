@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
+	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/app"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/config"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
 )
 
 func main() {

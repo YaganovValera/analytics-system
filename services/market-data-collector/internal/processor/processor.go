@@ -1,4 +1,3 @@
-// services/market-data-collector/internal/processor/processor.go
 package processor
 
 import (
@@ -8,11 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/YaganovValera/analytics-system/common/kafka"
+	"github.com/YaganovValera/analytics-system/common/logger"
 	marketdatapb "github.com/YaganovValera/analytics-system/proto/v1/marketdata"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/kafka"
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/logger"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -28,25 +28,18 @@ const (
 	EventTypeDepthUpdate = "depthUpdate"
 )
 
-// Topics хранит имена топиков Kafka.
 type Topics struct {
 	RawTopic       string
 	OrderBookTopic string
 }
 
-// processorImpl — приватная реализация Processor.
 type processorImpl struct {
 	producer kafka.Producer
 	topics   Topics
 	log      *logger.Logger
 }
 
-// New создаёт Processor и возвращает его как интерфейс.
-func New(
-	producer kafka.Producer,
-	topics Topics,
-	log *logger.Logger,
-) Processor {
+func New(producer kafka.Producer, topics Topics, log *logger.Logger) Processor {
 	return &processorImpl{
 		producer: producer,
 		topics:   topics,
@@ -54,7 +47,6 @@ func New(
 	}
 }
 
-// Process маршрутизирует событие raw по типу.
 func (p *processorImpl) Process(ctx context.Context, raw binance.RawMessage) error {
 	ctx, span := tracer.Start(ctx, "Process",
 		trace.WithAttributes(attribute.String("event.type", raw.Type)))
@@ -208,7 +200,11 @@ func parseDepth(data []byte) (*depthEvent, error) {
 		return nil, err
 	}
 
+	// внутри parseDepth
 	convert := func(pair []string) (*marketdatapb.OrderBookLevel, error) {
+		if len(pair) < 2 {
+			return nil, fmt.Errorf("malformed price-level: %v", pair)
+		}
 		price, err := strconv.ParseFloat(pair[0], 64)
 		if err != nil {
 			return nil, fmt.Errorf("price=%q: %w", pair[0], err)

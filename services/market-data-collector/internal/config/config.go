@@ -12,8 +12,14 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 
-	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/backoff"
+	"github.com/YaganovValera/analytics-system/common/backoff"
 )
+
+/*
+   --------------------------------------------------------------------------
+   СТРУКТУРЫ
+   --------------------------------------------------------------------------
+*/
 
 // Config — все настройки сервиса.
 type Config struct {
@@ -60,67 +66,84 @@ type Logging struct {
 	DevMode bool   `mapstructure:"dev_mode"`
 }
 
-// HTTPConfig хранит настройки HTTP-сервера.
+// HTTPConfig хранит конфигурацию HTTP-/metrics-сервера.
 type HTTPConfig struct {
-	Port int `mapstructure:"port"`
+	Port            int           `mapstructure:"port"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout     time.Duration `mapstructure:"idle_timeout"`
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	MetricsPath     string        `mapstructure:"metrics_path"`
+	HealthzPath     string        `mapstructure:"healthz_path"`
+	ReadyzPath      string        `mapstructure:"readyz_path"`
 }
 
-// Load загружает и валидирует конфиг по указанному пути.
-// Если path пустой, читаются только defaults и ENV.
+/*
+   --------------------------------------------------------------------------
+   LOADER
+   --------------------------------------------------------------------------
+*/
+
+// Load загружает и валидирует конфиг. Если path пустой — читаются только ENV и defaults.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
-	// 1) Defaults
+	// ---------- 1) Defaults ----------
 	v.SetDefault("service_name", "market-data-collector")
 	v.SetDefault("service_version", "v1.0.0")
 
+	// Binance
 	v.SetDefault("binance.ws_url", "wss://stream.binance.com:9443/ws")
 	v.SetDefault("binance.read_timeout", "30s")
 	v.SetDefault("binance.subscribe_timeout", "5s")
 	v.SetDefault("binance.symbols", []string{"btcusdt@trade"})
 
+	// Kafka
 	v.SetDefault("kafka.acks", "all")
 	v.SetDefault("kafka.timeout", "15s")
 	v.SetDefault("kafka.compression", "none")
 	v.SetDefault("kafka.flush_frequency", "0s")
 	v.SetDefault("kafka.flush_messages", 0)
 
-	// Default OTLP endpoint so Validate won't fail if not set by user
-	v.SetDefault("telemetry.otel_endpoint", "localhost:4317")
+	// Telemetry
+	v.SetDefault("telemetry.otel_endpoint", "otel-collector:4317")
 	v.SetDefault("telemetry.insecure", false)
 
+	// Logging
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.dev_mode", false)
 
+	// HTTP server defaults (ранее было только port)
 	v.SetDefault("http.port", 8080)
+	v.SetDefault("http.read_timeout", "10s")
+	v.SetDefault("http.write_timeout", "15s")
+	v.SetDefault("http.idle_timeout", "60s")
+	v.SetDefault("http.shutdown_timeout", "5s")
+	v.SetDefault("http.metrics_path", "/metrics")
+	v.SetDefault("http.healthz_path", "/healthz")
+	v.SetDefault("http.readyz_path", "/readyz")
 
-	// 2) ENV
+	// ---------- 2) ENV ----------
 	v.SetEnvPrefix("COLLECTOR")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// 3) Config file
+	// ---------- 3) Optional file ----------
 	if path != "" {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
-			used := v.ConfigFileUsed()
-			return nil, fmt.Errorf("read config %q: %w", used, err)
+			return nil, fmt.Errorf("read config %q: %w", v.ConfigFileUsed(), err)
 		}
 	}
 
-	// 4) Decode with hooks
+	// ---------- 4) Decode ----------
 	var cfg Config
 	decodeHook := mapstructure.ComposeDecodeHookFunc(
 		mapstructure.StringToTimeDurationHookFunc(),
 		mapstructure.StringToSliceHookFunc(","),
-		func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
-			if f == reflect.String && t == reflect.Bool {
-				return strconv.ParseBool(data.(string))
-			}
-			return data, nil
-		},
+		stringToBoolHook,
 	)
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:    "mapstructure",
 		Result:     &cfg,
 		DecodeHook: decodeHook,
@@ -128,20 +151,33 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create decoder: %w", err)
 	}
-	if err := decoder.Decode(v.AllSettings()); err != nil {
+	if err := dec.Decode(v.AllSettings()); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
 
-	// 5) Validation
+	// ---------- 5) Validation ----------
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	return &cfg, nil
 }
 
-// Validate проверяет обязательные поля и допустимые значения.
+// stringToBoolHook разбирает true/false, иначе отдает исходные данные.
+func stringToBoolHook(f, t reflect.Kind, data interface{}) (interface{}, error) {
+	if f == reflect.String && t == reflect.Bool {
+		return strconv.ParseBool(data.(string))
+	}
+	return data, nil
+}
+
+/*
+   --------------------------------------------------------------------------
+   VALIDATION
+   --------------------------------------------------------------------------
+*/
+
 func (c *Config) Validate() error {
-	// service
+	// Service
 	if c.ServiceName == "" {
 		return fmt.Errorf("service_name is required")
 	}
@@ -149,7 +185,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("service_version is required")
 	}
 
-	// binance
+	// Binance
 	if c.Binance.WSURL == "" {
 		return fmt.Errorf("binance.ws_url is required")
 	}
@@ -163,49 +199,79 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("binance.subscribe_timeout must be > 0")
 	}
 
-	// kafka
+	// Kafka
 	if len(c.Kafka.Brokers) == 0 {
 		return fmt.Errorf("kafka.brokers is required")
 	}
 	if c.Kafka.RawTopic == "" || c.Kafka.OrderBookTopic == "" {
 		return fmt.Errorf("kafka.raw_topic and kafka.orderbook_topic are required")
 	}
-	acks := strings.ToLower(c.Kafka.Acks)
-	switch acks {
+	switch strings.ToLower(c.Kafka.Acks) {
 	case "all", "leader", "none":
 	default:
 		return fmt.Errorf("kafka.acks must be one of [all, leader, none]")
 	}
-	comp := strings.ToLower(c.Kafka.Compression)
-	switch comp {
+	switch strings.ToLower(c.Kafka.Compression) {
 	case "none", "gzip", "snappy", "lz4", "zstd":
 	default:
 		return fmt.Errorf("kafka.compression must be one of [none, gzip, snappy, lz4, zstd]")
 	}
 
-	// telemetry
+	// Telemetry
 	if c.Telemetry.OTLPEndpoint == "" {
 		return fmt.Errorf("telemetry.otel_endpoint is required")
 	}
 
-	// logging
-	lvl := strings.ToLower(c.Logging.Level)
-	switch lvl {
+	// Logging
+	switch strings.ToLower(c.Logging.Level) {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("logging.level must be one of [debug, info, warn, error]")
 	}
 
-	// http
-	if c.HTTP.Port <= 0 || c.HTTP.Port > 65535 {
-		return fmt.Errorf("http.port must be between 1 and 65535")
+	// HTTP
+	if err := validateHTTP(&c.HTTP); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-// Print выводит текущий конфиг в формате JSON.
-// Полезно для отладки в DevMode.
+func validateHTTP(h *HTTPConfig) error {
+	if h.Port <= 0 || h.Port > 65535 {
+		return fmt.Errorf("http.port must be between 1 and 65535")
+	}
+	durations := map[string]time.Duration{
+		"http.read_timeout":     h.ReadTimeout,
+		"http.write_timeout":    h.WriteTimeout,
+		"http.idle_timeout":     h.IdleTimeout,
+		"http.shutdown_timeout": h.ShutdownTimeout,
+	}
+	for k, d := range durations {
+		if d <= 0 {
+			return fmt.Errorf("%s must be > 0", k)
+		}
+	}
+	paths := map[string]string{
+		"http.metrics_path": h.MetricsPath,
+		"http.healthz_path": h.HealthzPath,
+		"http.readyz_path":  h.ReadyzPath,
+	}
+	for k, p := range paths {
+		if !strings.HasPrefix(p, "/") {
+			return fmt.Errorf("%s must start with '/'", k)
+		}
+	}
+	return nil
+}
+
+/*
+   --------------------------------------------------------------------------
+   DEBUG PRINT
+   --------------------------------------------------------------------------
+*/
+
+// Print выводит текущий конфиг в JSON (удобно в DevMode).
 func (c *Config) Print() {
 	b, _ := json.MarshalIndent(c, "", "  ")
 	fmt.Println("Loaded configuration:\n", string(b))
