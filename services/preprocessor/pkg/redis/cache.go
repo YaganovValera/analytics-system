@@ -1,4 +1,3 @@
-// services/preprocessor/pkg/redis/cache.go
 package redis
 
 import (
@@ -6,107 +5,181 @@ import (
 	"fmt"
 	"time"
 
-	goredis "github.com/go-redis/redis/v8"
+	"github.com/YaganovValera/analytics-system/common/backoff"
+	"github.com/YaganovValera/analytics-system/common/logger"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-
-	"github.com/YaganovValera/analytics-system/services/preprocessor/pkg/logger"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
-	redisSetErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "preprocessor", Subsystem: "redis_cache", Name: "set_errors_total",
-		Help: "Количество ошибок при записи в Redis",
-	})
-	redisGetErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "preprocessor", Subsystem: "redis_cache", Name: "get_errors_total",
-		Help: "Количество ошибок при чтении из Redis",
-	})
-	redisGetMiss = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "preprocessor", Subsystem: "redis_cache", Name: "get_misses_total",
-		Help: "Количество промахов при чтении из Redis (ключ не найден)",
-	})
-	redisGetHit = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "preprocessor", Subsystem: "redis_cache", Name: "get_hits_total",
-		Help: "Количество успешных чтений из Redis",
-	})
+	redisMetrics = struct {
+		GetErrors        prometheus.Counter
+		SetErrors        prometheus.Counter
+		DeleteErrors     prometheus.Counter
+		OperationLatency prometheus.Histogram
+	}{
+		GetErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "redis", Name: "get_errors_total",
+			Help: "Total number of errors on Redis GET",
+		}),
+		SetErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "redis", Name: "set_errors_total",
+			Help: "Total number of errors on Redis SET",
+		}),
+		DeleteErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "redis", Name: "delete_errors_total",
+			Help: "Total number of errors on Redis DEL",
+		}),
+		OperationLatency: promauto.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "preprocessor", Subsystem: "redis", Name: "operation_latency_seconds",
+			Help:    "Latency of Redis operations",
+			Buckets: prometheus.DefBuckets,
+		}),
+	}
+	tracer = otel.Tracer("redis-storage")
 )
 
-var tracer = otel.Tracer("redis-cache")
+// ErrNotFound возвращается, если ключ отсутствует.
+var ErrNotFound = fmt.Errorf("redis: key not found")
 
-// Config дублируется из internal/config для удобства pkg.
+// Config хранит параметры подключения к Redis.
 type Config struct {
-	Address  string
-	Password string
-	DB       int
-	TTL      time.Duration
+	URL     string        // e.g. "redis://host:6379/0"
+	TTL     time.Duration // default: 10m
+	Backoff backoff.Config
 }
 
-// NewCache создаёт подключение к Redis и пингует его.
-func NewCache(cfg Config, log *logger.Logger) (Cache, error) {
-	log = log.Named("redis")
-	opts := &goredis.Options{
-		Addr:     cfg.Address,
-		Password: cfg.Password,
-		DB:       cfg.DB,
+// applyDefaults задаёт sane defaults.
+func (c *Config) applyDefaults() {
+	if c.TTL <= 0 {
+		c.TTL = 10 * time.Minute
 	}
-	client := goredis.NewClient(opts)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("redis: ping failed: %w", err)
-	}
-	log.Info("redis: connected", zap.String("addr", cfg.Address), zap.Int("db", cfg.DB))
-	return &cacheImpl{client: client, logger: log}, nil
 }
 
-type cacheImpl struct {
-	client *goredis.Client
-	logger *logger.Logger
-}
-
-// Set сохраняет value по ключу key с TTL.
-func (c *cacheImpl) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
-	ctx, span := tracer.Start(ctx, "Redis.Set",
-		trace.WithAttributes(attribute.String("key", key)))
-	defer span.End()
-
-	if err := c.client.Set(ctx, key, value, ttl).Err(); err != nil {
-		redisSetErrors.Inc()
-		span.RecordError(err)
-		c.logger.Error("redis: set failed", zap.Error(err), zap.String("key", key))
-		return err
+// validate проверяет обязательные поля.
+func (c *Config) validate() error {
+	if c.URL == "" {
+		return fmt.Errorf("redis: URL required")
 	}
 	return nil
 }
 
-// Get возвращает value по ключу key. Если ключ отсутствует, возвращает (nil, nil).
-func (c *cacheImpl) Get(ctx context.Context, key string) ([]byte, error) {
-	ctx, span := tracer.Start(ctx, "Redis.Get",
-		trace.WithAttributes(attribute.String("key", key)))
-	defer span.End()
-
-	val, err := c.client.Get(ctx, key).Bytes()
-	if err != nil {
-		if err == goredis.Nil {
-			redisGetMiss.Inc()
-			return nil, nil
-		}
-		redisGetErrors.Inc()
-		span.RecordError(err)
-		c.logger.Error("redis: get failed", zap.Error(err), zap.String("key", key))
-		return nil, err
-	}
-	redisGetHit.Inc()
-	return val, nil
+// redisStorage — продакшен-реализация Storage через go-redis/v8.
+type redisStorage struct {
+	client     *redis.Client
+	ttl        time.Duration
+	log        *logger.Logger
+	backoffCfg backoff.Config
 }
 
-// Close корректно закрывает клиент.
-func (c *cacheImpl) Close() error {
-	return c.client.Close()
+// New создает Storage, соединяется с Redis, с retry и метриками.
+func New(ctx context.Context, cfg Config, log *logger.Logger) (Storage, error) {
+	cfg.applyDefaults()
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	log = log.Named("redis")
+
+	// парсим URL
+	opts, err := redis.ParseURL(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("redis: parse URL: %w", err)
+	}
+	client := redis.NewClient(opts)
+
+	// Проверяем соединение с retry
+	op := func(ctx context.Context) error { return client.Ping(ctx).Err() }
+	ctxConn, span := tracer.Start(ctx, "Connect", trace.WithAttributes(attribute.String("url", cfg.URL)))
+	if err := backoff.Execute(ctxConn, cfg.Backoff, log, op); err != nil {
+		span.RecordError(err)
+		span.End()
+		return nil, fmt.Errorf("redis connect: %w", err)
+	}
+	span.End()
+	log.Info("redis: connected", zap.String("url", cfg.URL))
+
+	return &redisStorage{
+		client:     client,
+		ttl:        cfg.TTL,
+		log:        log,
+		backoffCfg: cfg.Backoff,
+	}, nil
+}
+
+func (r *redisStorage) Get(ctx context.Context, key string) ([]byte, error) {
+	ctxOp, span := tracer.Start(ctx, "Get", trace.WithAttributes(attribute.String("key", key)))
+	defer span.End()
+
+	start := time.Now()
+
+	var data []byte
+	op := func(ctx context.Context) error {
+		val, err := r.client.Get(ctx, key).Bytes()
+		if err == redis.Nil {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		data = val
+		return nil
+	}
+	if err := backoff.Execute(ctxOp, r.backoffCfg, r.log, op); err != nil {
+		if err == ErrNotFound {
+			return nil, ErrNotFound
+		}
+		redisMetrics.GetErrors.Inc()
+		r.log.WithContext(ctx).Error("redis GET failed", zap.String("key", key), zap.Error(err))
+		span.RecordError(err)
+		return nil, err
+	}
+	redisMetrics.OperationLatency.Observe(time.Since(start).Seconds())
+	return data, nil
+}
+
+func (r *redisStorage) Set(ctx context.Context, key string, value []byte) error {
+	ctxOp, span := tracer.Start(ctx, "Set", trace.WithAttributes(attribute.String("key", key)))
+	defer span.End()
+
+	start := time.Now()
+	op := func(ctx context.Context) error {
+		return r.client.Set(ctx, key, value, r.ttl).Err()
+	}
+	if err := backoff.Execute(ctxOp, r.backoffCfg, r.log, op); err != nil {
+		redisMetrics.SetErrors.Inc()
+		r.log.WithContext(ctx).Error("redis SET failed", zap.String("key", key), zap.Error(err))
+		span.RecordError(err)
+		return err
+	}
+	redisMetrics.OperationLatency.Observe(time.Since(start).Seconds())
+	return nil
+}
+
+func (r *redisStorage) Delete(ctx context.Context, key string) error {
+	ctxOp, span := tracer.Start(ctx, "Delete", trace.WithAttributes(attribute.String("key", key)))
+	defer span.End()
+
+	start := time.Now()
+	op := func(ctx context.Context) error {
+		_, err := r.client.Del(ctx, key).Result()
+		return err
+	}
+	if err := backoff.Execute(ctxOp, r.backoffCfg, r.log, op); err != nil {
+		redisMetrics.DeleteErrors.Inc()
+		r.log.WithContext(ctx).Error("redis DEL failed", zap.String("key", key), zap.Error(err))
+		span.RecordError(err)
+		return err
+	}
+	redisMetrics.OperationLatency.Observe(time.Since(start).Seconds())
+	return nil
+}
+
+func (r *redisStorage) Close() error {
+	return r.client.Close()
 }

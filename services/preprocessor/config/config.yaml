@@ -1,39 +1,95 @@
-service_name: "preprocessor"
+# --------------------------------------------------------------------------- #
+#  Service identification
+# --------------------------------------------------------------------------- #
+service_name:    "preprocessor"
 service_version: "v1.0.0"
 
+# --------------------------------------------------------------------------- #
+#  Binance (влияет только на список символов для Aggregator)
+# --------------------------------------------------------------------------- #
+binance:
+  raw_topic: "marketdata.raw"
+  symbols:
+    - "btcusdt@trade"
+    - "ethusdt@trade"
+  backoff:          # ← back-off коннектора Kafka-consumer (опционально)
+    initial_interval:   "1s"
+    randomization_factor: 0.5
+    multiplier:          2.0
+    max_interval:        "30s"
+    max_elapsed_time:    "5m"
+
+# --------------------------------------------------------------------------- #
+#  Kafka
+# --------------------------------------------------------------------------- #
 kafka:
   brokers:
     - "kafka:9092"
-  raw_topic: "marketdata.raw"
-  orderbook_topic: "marketdata.orderbook"
-  aggregation_topics:
-    - interval: "1m"
-      topic: "marketdata.agg.1m"
-    - interval: "5m"
-      topic: "marketdata.agg.5m"
-    - interval: "15m"
-      topic: "marketdata.agg.15m"
-    - interval: "1h"
-      topic: "marketdata.agg.1h"
-  group_id: "preprocessor-group"
+  candles_topic: "marketdata.candles"
+
+  timeout:     "15s"
+  acks:        "all"      # all | leader | none
+  compression: "none"     # none | gzip | snappy | lz4 | zstd
   backoff:
-    initial_interval: "1s"
-    max_interval: "30s"
-    max_elapsed_time: "5m"
+    initial_interval:   "1s"
+    randomization_factor: 0.5
+    multiplier:          2.0
+    max_interval:        "30s"
+    max_elapsed_time:    "5m"
 
+# --------------------------------------------------------------------------- #
+#  Redis
+# --------------------------------------------------------------------------- #
 redis:
-  address: "redis:6379"
-  password: ""
-  db: 0
-  ttl: "5m"
+  url: "redis://redis:6379/0"
+  ttl: "10m"
+  backoff:
+    initial_interval:   "1s"
+    randomization_factor: 0.5
+    multiplier:          2.0
+    max_interval:        "30s"
+    max_elapsed_time:    "5m"
 
+# --------------------------------------------------------------------------- #
+#  OpenTelemetry
+# --------------------------------------------------------------------------- #
 telemetry:
   otel_endpoint: "otel-collector:4317"
-  insecure: false
+  insecure:      false   # true → gRPC без TLS
 
+# --------------------------------------------------------------------------- #
+#  Logging
+# --------------------------------------------------------------------------- #
 logging:
-  level: "info"
-  dev_mode: false
+  level:    "info"   # debug | info | warn | error
+  dev_mode: false    # true → человекочитаемый вывод
 
+# --------------------------------------------------------------------------- #
+#  Embedded HTTP / metrics server
+# --------------------------------------------------------------------------- #
 http:
-  port: 8090
+  port:              8090
+
+  # --- таймауты (должны быть >0) ---
+  read_timeout:      "10s"
+  write_timeout:     "15s"
+  idle_timeout:      "60s"
+  shutdown_timeout:  "5s"
+
+  # --- кастомные пути (должны начинаться с /) ---
+  metrics_path:  "/metrics"
+  healthz_path:  "/healthz"
+  readyz_path:   "/readyz"
+
+# --------------------------------------------------------------------------- #
+#  Processor (агрегационные интервалы)
+# --------------------------------------------------------------------------- #
+processor:
+  # При необходимости можно оставить только нужные интервалы
+  intervals:
+    - 1  # AGG_INTERVAL_1_MINUTE
+    - 2  # AGG_INTERVAL_5_MINUTES
+    - 3  # AGG_INTERVAL_15_MINUTES
+    - 4  # AGG_INTERVAL_1_HOUR
+    - 5  # AGG_INTERVAL_4_HOURS
+    - 6  # AGG_INTERVAL_1_DAY
