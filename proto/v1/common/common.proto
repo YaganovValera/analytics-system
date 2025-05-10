@@ -4,7 +4,6 @@ syntax = "proto3";
 package market.common.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/v1/common;commonpb";
 
-import "google/protobuf/empty.proto";
 
 // ErrorCode defines standard error codes for streaming operations.
 enum ErrorCode {
@@ -39,6 +38,11 @@ message Pagination {
   string page_token = 2;  // Token for the next page
 }
 
+// Request for paginated symbol discovery.
+message ListSymbolsRequest {
+  Pagination pagination = 1;
+}
+
 // Response for symbol discovery.
 message ListSymbolsResponse {
   repeated string symbols        = 1;  // Available trading symbols
@@ -47,7 +51,6 @@ message ListSymbolsResponse {
 
 // CommonService provides discovery and utility methods.
 service CommonService {
-  // Lists available trading symbols with pagination.
-  rpc ListSymbols(google.protobuf.Empty) returns (ListSymbolsResponse);
+  rpc ListSymbols(ListSymbolsRequest) returns (ListSymbolsResponse);
 }
 

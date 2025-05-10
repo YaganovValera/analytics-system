@@ -81,13 +81,10 @@ message GetOrderBookResponse {
 service MarketDataService {
   // Streams live market data events.
   rpc StreamMarketData(google.protobuf.Empty) returns (stream MarketDataEvent);
-
   // Streams live order book snapshots.
   rpc StreamOrderBook(google.protobuf.Empty) returns (stream OrderBookEvent);
-
   // Returns a page of historical market data.
   rpc GetMarketData(GetMarketDataRequest) returns (GetMarketDataResponse);
-
   // Returns a page of historical order book snapshots.
   rpc GetOrderBook(GetOrderBookRequest) returns (GetOrderBookResponse);
 }

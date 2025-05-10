@@ -13,7 +13,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -31,8 +30,7 @@ const (
 //
 // CommonService provides discovery and utility methods.
 type CommonServiceClient interface {
-	// Lists available trading symbols with pagination.
-	ListSymbols(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListSymbolsResponse, error)
+	ListSymbols(ctx context.Context, in *ListSymbolsRequest, opts ...grpc.CallOption) (*ListSymbolsResponse, error)
 }
 
 type commonServiceClient struct {
@@ -43,7 +41,7 @@ func NewCommonServiceClient(cc grpc.ClientConnInterface) CommonServiceClient {
 	return &commonServiceClient{cc}
 }
 
-func (c *commonServiceClient) ListSymbols(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListSymbolsResponse, error) {
+func (c *commonServiceClient) ListSymbols(ctx context.Context, in *ListSymbolsRequest, opts ...grpc.CallOption) (*ListSymbolsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListSymbolsResponse)
 	err := c.cc.Invoke(ctx, CommonService_ListSymbols_FullMethodName, in, out, cOpts...)
@@ -59,8 +57,7 @@ func (c *commonServiceClient) ListSymbols(ctx context.Context, in *emptypb.Empty
 //
 // CommonService provides discovery and utility methods.
 type CommonServiceServer interface {
-	// Lists available trading symbols with pagination.
-	ListSymbols(context.Context, *emptypb.Empty) (*ListSymbolsResponse, error)
+	ListSymbols(context.Context, *ListSymbolsRequest) (*ListSymbolsResponse, error)
 	mustEmbedUnimplementedCommonServiceServer()
 }
 
@@ -71,7 +68,7 @@ type CommonServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedCommonServiceServer struct{}
 
-func (UnimplementedCommonServiceServer) ListSymbols(context.Context, *emptypb.Empty) (*ListSymbolsResponse, error) {
+func (UnimplementedCommonServiceServer) ListSymbols(context.Context, *ListSymbolsRequest) (*ListSymbolsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSymbols not implemented")
 }
 func (UnimplementedCommonServiceServer) mustEmbedUnimplementedCommonServiceServer() {}
@@ -96,7 +93,7 @@ func RegisterCommonServiceServer(s grpc.ServiceRegistrar, srv CommonServiceServe
 }
 
 func _CommonService_ListSymbols_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(ListSymbolsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -108,7 +105,7 @@ func _CommonService_ListSymbols_Handler(srv interface{}, ctx context.Context, de
 		FullMethod: CommonService_ListSymbols_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CommonServiceServer).ListSymbols(ctx, req.(*emptypb.Empty))
+		return srv.(CommonServiceServer).ListSymbols(ctx, req.(*ListSymbolsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

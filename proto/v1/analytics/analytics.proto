@@ -5,7 +5,6 @@ package market.analytics.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/v1/analytics;analyticspb";
 
 import "google/protobuf/timestamp.proto";
-
 import "common/common.proto";
 
 // Candle represents a single OHLCV data point.
