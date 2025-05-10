@@ -8,10 +8,11 @@ receivers:
 
 exporters:
   debug: {}
-  jaeger:
+  otlp:
     endpoint: "jaeger:14250"
     tls:
       insecure: true
+
 
 extensions:
   health_check:
@@ -23,4 +24,4 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [debug, jaeger]
+      exporters: [debug, otlp]

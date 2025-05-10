@@ -2,7 +2,6 @@ package redis
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -117,30 +116,37 @@ func (r *redisStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	ctxOp, span := tracer.Start(ctx, "Get", trace.WithAttributes(attribute.String("key", key)))
 	defer span.End()
 
+	val, err := r.client.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, ErrNotFound
+	}
+
 	start := time.Now()
 
 	var data []byte
 	op := func(ctx context.Context) error {
-		val, err := r.client.Get(ctx, key).Bytes()
+		v, err := r.client.Get(ctx, key).Bytes()
 		if err == redis.Nil {
 			return backoff.Permanent(ErrNotFound)
 		}
 		if err != nil {
 			return err
 		}
-		data = val
+		data = v
 		return nil
 	}
 	if err := backoff.Execute(ctxOp, r.backoffCfg, r.log, op); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, ErrNotFound
-		}
 		redisMetrics.GetErrors.Inc()
 		r.log.WithContext(ctx).Error("redis GET failed", zap.String("key", key), zap.Error(err))
 		span.RecordError(err)
 		return nil, err
 	}
+
 	redisMetrics.OperationLatency.Observe(time.Since(start).Seconds())
+	if data == nil {
+		data = val
+	}
+
 	return data, nil
 }
 
