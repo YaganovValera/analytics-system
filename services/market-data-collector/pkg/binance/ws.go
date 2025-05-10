@@ -20,87 +20,57 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
 
-/*
-   ============================================================================
-   Prometheus-метрики с обязательным label {service="<name>"}
-   ============================================================================
-*/
+// -----------------------------------------------------------------------------
+// Prometheus-метрики
+// -----------------------------------------------------------------------------
 
 var (
-	serviceLabel = "unknown" // переопределяется через SetServiceLabel()
-
-	wsConnects = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "connects_total",
-			Help: "Total WebSocket connection attempts",
-		},
-		[]string{"service"},
-	)
-	wsConnectErrors = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "connect_errors_total",
-			Help: "Total WebSocket connection errors on first try",
-		},
-		[]string{"service"},
-	)
-	wsReconnects = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "reconnects_total",
-			Help: "Total WebSocket reconnections after read-loop failures",
-		},
-		[]string{"service"},
-	)
-	wsMessages = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "messages_received_total",
-			Help: "Total messages received from WebSocket",
-		},
-		[]string{"service"},
-	)
-	wsSubscribeErrors = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "subscribe_errors_total",
-			Help: "Total subscription errors",
-		},
-		[]string{"service"},
-	)
-	wsReadErrors = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "read_errors_total",
-			Help: "Total read errors from WebSocket",
-		},
-		[]string{"service"},
-	)
-	wsPingErrors = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "ping_errors_total",
-			Help: "Total ping failures",
-		},
-		[]string{"service"},
-	)
-	wsBufferDrops = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "collector", Subsystem: "binance_ws", Name: "buffer_drops_total",
-			Help: "Number of messages dropped because buffer was full",
-		},
-		[]string{"service"},
-	)
+	serviceLabel = "unknown"
+	wsConnects   = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "connects_total",
+		Help: "Total WebSocket connection attempts",
+	}, []string{"service"})
+	wsConnectErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "connect_errors_total",
+		Help: "Total initial connection errors",
+	}, []string{"service"})
+	wsReconnects = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "reconnects_total",
+		Help: "Total reconnections after read failures",
+	}, []string{"service"})
+	wsMessages = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "messages_received_total",
+		Help: "Total messages received from WebSocket",
+	}, []string{"service"})
+	wsSubscribeErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "subscribe_errors_total",
+		Help: "Errors during SUBSCRIBE",
+	}, []string{"service"})
+	wsReadErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "read_errors_total",
+		Help: "Errors during ReadLoop",
+	}, []string{"service"})
+	wsPingErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "ping_errors_total",
+		Help: "WebSocket ping failures",
+	}, []string{"service"})
+	wsBufferDrops = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "collector", Subsystem: "binance_ws", Name: "buffer_drops_total",
+		Help: "Dropped frames due to full buffer",
+	}, []string{"service"})
 )
 
-// SetServiceLabel предоставляется для common.InitServiceName().
 func SetServiceLabel(name string) { serviceLabel = name }
 
 var tracer = otel.Tracer("binance-ws")
 
-/*
-   ============================================================================
-   Public types
-   ============================================================================
-*/
+// -----------------------------------------------------------------------------
+// Public types
+// -----------------------------------------------------------------------------
 
 type RawMessage struct {
-	Data []byte
-	Type string
+	Data []byte // JSON-пейлоад
+	Type string // значение поля "e" из JSON: "trade" или "depthUpdate"
 }
 
 type Config struct {
@@ -125,21 +95,18 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
-	switch {
-	case c.URL == "":
-		return fmt.Errorf("binance-ws: URL is required")
-	case len(c.Streams) == 0:
-		return fmt.Errorf("binance-ws: at least one stream is required")
-	default:
-		return nil
+	if c.URL == "" {
+		return fmt.Errorf("binance-ws: URL required")
 	}
+	if len(c.Streams) == 0 {
+		return fmt.Errorf("binance-ws: at least one stream required")
+	}
+	return nil
 }
 
-/*
-   ============================================================================
-   Connector implementation
-   ============================================================================
-*/
+// -----------------------------------------------------------------------------
+// Connector
+// -----------------------------------------------------------------------------
 
 type binanceConnector struct {
 	cfg         Config
@@ -158,15 +125,8 @@ func NewConnector(cfg Config, log *logger.Logger) (Connector, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &binanceConnector{
-		cfg: cfg,
-		log: log.Named("binance-ws"),
-	}, nil
+	return &binanceConnector{cfg: cfg, log: log.Named("binance-ws")}, nil
 }
-
-// -----------------------------------------------------------------------------
-// Public API
-// -----------------------------------------------------------------------------
 
 func (c *binanceConnector) Stream(ctx context.Context) (<-chan RawMessage, error) {
 	ch := make(chan RawMessage, c.cfg.BufferSize)
@@ -187,42 +147,36 @@ func (c *binanceConnector) Close() error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// Internal logic
-// -----------------------------------------------------------------------------
-
 func (c *binanceConnector) run(ctx context.Context, ch chan<- RawMessage) {
 	defer close(ch)
 	for {
 		if ctx.Err() != nil || c.closed.Load() {
-			c.log.Info("ws: stopping run loop")
+			c.log.Info("ws: stopping")
 			return
 		}
 
-		// 1. Connect
+		// connect
 		wsConnects.WithLabelValues(serviceLabel).Inc()
-		ctxConn, spanConn := tracer.Start(ctx, "WS.Connect",
-			trace.WithAttributes(attribute.String("url", c.cfg.URL)))
+		ctxConn, spanConn := tracer.Start(ctx, "WS.Connect", trace.WithAttributes(attribute.String("url", c.cfg.URL)))
 		conn, err := c.connect(ctxConn)
 		spanConn.End()
 		if err != nil {
 			wsConnectErrors.WithLabelValues(serviceLabel).Inc()
-			c.log.Error("ws: connect failed", zap.Error(err))
+			c.log.Error("connect failed", zap.Error(err))
 			return
 		}
-
 		c.mu.Lock()
 		c.conn = conn
 		c.mu.Unlock()
-		c.log.Info("ws: connected", zap.String("url", c.cfg.URL))
+		c.log.Info("connected")
 
-		// 2. Pinger
-		cancelPing := c.startPinger(ctx, conn)
+		// pinger
+		cancel := c.startPinger(ctx, conn)
 		c.mu.Lock()
-		c.cancelPing = cancelPing
+		c.cancelPing = cancel
 		c.mu.Unlock()
 
-		// 3. Subscribe
+		// subscribe
 		ctxSub, spanSub := tracer.Start(ctx, "WS.Subscribe")
 		err = backoff.Execute(ctxSub, c.cfg.BackoffConfig, c.log, func(ctx context.Context) error {
 			return c.subscribe(ctx, conn)
@@ -230,24 +184,24 @@ func (c *binanceConnector) run(ctx context.Context, ch chan<- RawMessage) {
 		spanSub.End()
 		if err != nil {
 			wsSubscribeErrors.WithLabelValues(serviceLabel).Inc()
-			c.log.Error("ws: subscribe failed", zap.Error(err))
-			cancelPing()
+			c.log.Error("subscribe failed", zap.Error(err))
+			cancel()
 			_ = conn.Close()
 			return
 		}
 
-		// 4. Read-loop
+		// read-loop
 		ctxRead, spanRead := tracer.Start(ctx, "WS.ReadLoop")
 		if err := c.readLoop(ctxRead, conn, ch); err != nil {
 			wsReadErrors.WithLabelValues(serviceLabel).Inc()
 			spanRead.RecordError(err)
-			c.log.Warn("ws: read loop error, reconnecting", zap.Error(err))
+			c.log.Warn("read loop error, reconnecting", zap.Error(err))
 			wsReconnects.WithLabelValues(serviceLabel).Inc()
 		}
 		spanRead.End()
 
-		// Cleanup
-		cancelPing()
+		// cleanup
+		cancel()
 		_ = conn.Close()
 	}
 }
@@ -268,19 +222,19 @@ func (c *binanceConnector) startPinger(ctx context.Context, conn *websocket.Conn
 		return conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))
 	})
 
-	pingCtx, cancel := context.WithCancel(ctx)
+	pctx, cancel := context.WithCancel(ctx)
 	ticker := time.NewTicker(c.cfg.ReadTimeout / 3)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-pingCtx.Done():
+			case <-pctx.Done():
 				return
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(1*time.Second)); err != nil {
+				conn.SetWriteDeadline(time.Now().Add(time.Second))
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
 					wsPingErrors.WithLabelValues(serviceLabel).Inc()
-					c.log.Warn("ws: ping failed", zap.Error(err))
+					c.log.Warn("ping failed", zap.Error(err))
 				}
 			}
 		}
@@ -304,37 +258,39 @@ func (c *binanceConnector) subscribe(ctx context.Context, conn *websocket.Conn) 
 
 func (c *binanceConnector) readLoop(ctx context.Context, conn *websocket.Conn, ch chan<- RawMessage) error {
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		_, bytes, err := conn.ReadMessage()
+		_, frame, err := conn.ReadMessage()
 		if err != nil {
 			return err
 		}
 		wsMessages.WithLabelValues(serviceLabel).Inc()
 
-		var env struct {
+		// Если Binance присылает envelope {"stream":..., "data":{...}}
+		raw := frame
+		var envelope struct {
 			Data json.RawMessage `json:"data"`
 		}
-		if err := json.Unmarshal(bytes, &env); err != nil {
-			c.log.Warn("ws: invalid envelope", zap.Error(err))
-			continue
+		if err := json.Unmarshal(frame, &envelope); err == nil && len(envelope.Data) > 0 {
+			raw = envelope.Data
 		}
 
+		// Определяем тип по полю "e"
 		msgType := "unknown"
-		var meta struct {
+		var mtype struct {
 			Event string `json:"e"`
 		}
-		if err := json.Unmarshal(env.Data, &meta); err == nil && meta.Event != "" {
-			msgType = meta.Event
+		if err := json.Unmarshal(raw, &mtype); err == nil && mtype.Event != "" {
+			msgType = mtype.Event
 		}
 
-		// non-blocking send + drop
+		// Шлём дальше (drop при переполнении)
 		select {
-		case ch <- RawMessage{Data: env.Data, Type: msgType}:
+		case ch <- RawMessage{Data: raw, Type: msgType}:
 		default:
 			wsBufferDrops.WithLabelValues(serviceLabel).Inc()
-			c.log.Warn("ws: buffer full, dropping message", zap.String("type", msgType))
+			c.log.Warn("buffer full, dropping", zap.String("type", msgType))
 		}
 	}
 }
