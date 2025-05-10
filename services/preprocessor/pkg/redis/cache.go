@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -131,7 +132,7 @@ func (r *redisStorage) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil
 	}
 	if err := backoff.Execute(ctxOp, r.backoffCfg, r.log, op); err != nil {
-		if err == ErrNotFound {
+		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
 		redisMetrics.GetErrors.Inc()

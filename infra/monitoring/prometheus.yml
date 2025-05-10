@@ -17,3 +17,9 @@ scrape_configs:
     static_configs:
       - targets:
           - 'market-data-collector:8080'
+
+  - job_name: 'preprocessor'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'preprocessor:8090'
