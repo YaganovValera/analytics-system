@@ -14,7 +14,7 @@ binance:
   # Список подписок; поддерживаются trade / depth / kline и т.д.
   symbols:
     - "btcusdt@trade"
-    - "ethusdt@depth"
+    # - "ethusdt@depth"
 
   # Таймауты и стратегия back-off
   read_timeout:       "30s"   # без pong → разрыв соединения
