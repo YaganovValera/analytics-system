@@ -39,6 +39,7 @@ type BinanceConfig struct {
 	ReadTimeout      time.Duration  `mapstructure:"read_timeout"`
 	SubscribeTimeout time.Duration  `mapstructure:"subscribe_timeout"`
 	Backoff          backoff.Config `mapstructure:"backoff"`
+	BufferSize       int            `mapstructure:"buffer_size"`
 }
 
 // KafkaConfig хранит настройки Kafka.
@@ -97,6 +98,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("binance.read_timeout", "30s")
 	v.SetDefault("binance.subscribe_timeout", "5s")
 	v.SetDefault("binance.symbols", []string{"btcusdt@trade"})
+	v.SetDefault("binance.buffer_size", 100)
 
 	// Kafka
 	v.SetDefault("kafka.acks", "all")

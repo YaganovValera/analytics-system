@@ -40,11 +40,6 @@ func main() {
 	}
 	defer log.Sync()
 
-	// 2a. Print config in DevMode
-	if cfg.Logging.DevMode {
-		cfg.Print()
-	}
-
 	log.Info("starting preprocessor service",
 		zap.String("service.name", cfg.ServiceName),
 		zap.String("service.version", cfg.ServiceVersion),

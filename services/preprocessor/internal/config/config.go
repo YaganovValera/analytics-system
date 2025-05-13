@@ -2,7 +2,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/YaganovValera/analytics-system/common/backoff"
-	commonpb "github.com/YaganovValera/analytics-system/proto/v1/common"
 )
 
 // -----------------------------------------------------------------------------
@@ -26,16 +24,10 @@ type Config struct {
 
 	Binance   BinanceConfig   `mapstructure:"binance"`
 	Kafka     KafkaConfig     `mapstructure:"kafka"`
-	Redis     RedisConfig     `mapstructure:"redis"`
+	Postgres  PostgresConfig  `mapstructure:"postgres"`
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
 	HTTP      HTTPConfig      `mapstructure:"http"`
-
-	Processor ProcessorConfig `mapstructure:"processor"`
-}
-
-type ProcessorConfig struct {
-	Intervals []commonpb.AggregationInterval `mapstructure:"intervals"`
 }
 
 type BinanceConfig struct {
@@ -45,32 +37,34 @@ type BinanceConfig struct {
 }
 
 type KafkaConfig struct {
-	Brokers      []string       `mapstructure:"brokers"`
-	CandlesTopic string         `mapstructure:"candles_topic"`
-	Timeout      time.Duration  `mapstructure:"timeout"`
-	Acks         string         `mapstructure:"acks"`
-	Compression  string         `mapstructure:"compression"`
-	Backoff      backoff.Config `mapstructure:"backoff"`
+	Brokers     []string       `mapstructure:"brokers"`
+	RawTopic    string         `mapstructure:"raw_topic"`
+	Timeout     time.Duration  `mapstructure:"timeout"`
+	Acks        string         `mapstructure:"acks"`
+	Compression string         `mapstructure:"compression"`
+	Backoff     backoff.Config `mapstructure:"backoff"`
 }
 
-type RedisConfig struct {
-	URL     string         `mapstructure:"url"`
-	TTL     time.Duration  `mapstructure:"ttl"`
-	Backoff backoff.Config `mapstructure:"backoff"`
+type PostgresConfig struct {
+	DSN             string        `mapstructure:"dsn"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 }
 
+// TelemetryConfig хранит настройки OpenTelemetry.
 type TelemetryConfig struct {
 	OTLPEndpoint string `mapstructure:"otel_endpoint"`
 	Insecure     bool   `mapstructure:"insecure"`
 }
 
+// LoggingConfig хранит настройки логгера.
 type LoggingConfig struct {
 	Level   string `mapstructure:"level"`
 	DevMode bool   `mapstructure:"dev_mode"`
 }
 
-// --- HTTP ---
-
+// HTTPConfig хранит конфигурацию HTTP-/metrics-сервера.
 type HTTPConfig struct {
 	Port            int           `mapstructure:"port"`
 	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
@@ -89,8 +83,7 @@ type HTTPConfig struct {
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
-	/* ---------- 1) defaults ---------- */
-
+	// 1) defaults
 	v.SetDefault("service_name", "preprocessor")
 	v.SetDefault("service_version", "v1.0.0")
 
@@ -99,13 +92,16 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("binance.symbols", []string{"btcusdt@trade"})
 
 	// Kafka
-	v.SetDefault("kafka.candles_topic", "marketdata.candles")
+	v.SetDefault("kafka.raw_topic", "marketdata.raw")
 	v.SetDefault("kafka.timeout", "15s")
 	v.SetDefault("kafka.acks", "all")
 	v.SetDefault("kafka.compression", "none")
 
-	// Redis
-	v.SetDefault("redis.ttl", "10m")
+	// Postgres
+	v.SetDefault("postgres.dsn", "postgres://user:pass@postgres:5432/analytics?sslmode=disable")
+	v.SetDefault("postgres.max_open_conns", 25)
+	v.SetDefault("postgres.max_idle_conns", 10)
+	v.SetDefault("postgres.conn_max_lifetime", "1h")
 
 	// Telemetry
 	v.SetDefault("telemetry.otel_endpoint", "otel-collector:4317")
@@ -115,7 +111,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.dev_mode", false)
 
-	// HTTP (полный набор)
+	// HTTP
 	v.SetDefault("http.port", 8090)
 	v.SetDefault("http.read_timeout", "10s")
 	v.SetDefault("http.write_timeout", "15s")
@@ -125,24 +121,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("http.healthz_path", "/healthz")
 	v.SetDefault("http.readyz_path", "/readyz")
 
-	// Processor intervals (по умолчанию — все поддерживаемые)
-	v.SetDefault("processor.intervals", []commonpb.AggregationInterval{
-		commonpb.AggregationInterval_AGG_INTERVAL_1_MINUTE,
-		commonpb.AggregationInterval_AGG_INTERVAL_5_MINUTES,
-		commonpb.AggregationInterval_AGG_INTERVAL_15_MINUTES,
-		commonpb.AggregationInterval_AGG_INTERVAL_1_HOUR,
-		commonpb.AggregationInterval_AGG_INTERVAL_4_HOURS,
-		commonpb.AggregationInterval_AGG_INTERVAL_1_DAY,
-	})
-
-	/* ---------- 2) env ---------- */
-
+	// 2) env
 	v.SetEnvPrefix("PREPROCESSOR")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	/* ---------- 3) optional file ---------- */
-
+	// 3) file
 	if path != "" {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
@@ -150,18 +134,12 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	/* ---------- 4) decode ---------- */
-
+	// 4) decode
 	var cfg Config
 	decodeHook := mapstructure.ComposeDecodeHookFunc(
 		mapstructure.StringToTimeDurationHookFunc(),
 		mapstructure.StringToSliceHookFunc(","),
-		func(f, t reflect.Kind, data interface{}) (interface{}, error) {
-			if f == reflect.String && t == reflect.Bool {
-				return strconv.ParseBool(data.(string))
-			}
-			return data, nil
-		},
+		stringToBoolHook,
 	)
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:    "mapstructure",
@@ -175,12 +153,18 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
 
-	/* ---------- 5) validate ---------- */
-
+	// 5) validate
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	return &cfg, nil
+}
+
+func stringToBoolHook(f, t reflect.Kind, data interface{}) (interface{}, error) {
+	if f == reflect.String && t == reflect.Bool {
+		return strconv.ParseBool(data.(string))
+	}
+	return data, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -188,7 +172,6 @@ func Load(path string) (*Config, error) {
 // -----------------------------------------------------------------------------
 
 func (c *Config) Validate() error {
-	// service
 	if c.ServiceName == "" {
 		return fmt.Errorf("service_name is required")
 	}
@@ -196,7 +179,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("service_version is required")
 	}
 
-	// binance
 	if c.Binance.RawTopic == "" {
 		return fmt.Errorf("binance.raw_topic is required")
 	}
@@ -204,12 +186,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("binance.symbols must contain at least one entry")
 	}
 
-	// kafka
 	if len(c.Kafka.Brokers) == 0 {
 		return fmt.Errorf("kafka.brokers is required")
 	}
-	if c.Kafka.CandlesTopic == "" {
-		return fmt.Errorf("kafka.candles_topic is required")
+	if c.Kafka.RawTopic == "" {
+		return fmt.Errorf("kafka.raw_topic is required")
 	}
 	if c.Kafka.Timeout <= 0 {
 		return fmt.Errorf("kafka.timeout must be > 0")
@@ -225,39 +206,31 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("kafka.compression must be one of [none, gzip, snappy, lz4, zstd]")
 	}
 
-	// redis
-	if c.Redis.URL == "" {
-		return fmt.Errorf("redis.url is required")
+	if c.Postgres.DSN == "" {
+		return fmt.Errorf("postgres.dsn is required")
 	}
-	if c.Redis.TTL <= 0 {
-		return fmt.Errorf("redis.ttl must be > 0")
+	if c.Postgres.MaxOpenConns < 1 {
+		return fmt.Errorf("postgres.max_open_conns must be > 0")
+	}
+	if c.Postgres.MaxIdleConns < 0 {
+		return fmt.Errorf("postgres.max_idle_conns must be ≥ 0")
+	}
+	if c.Postgres.ConnMaxLifetime <= 0 {
+		return fmt.Errorf("postgres.conn_max_lifetime must be > 0")
 	}
 
-	// telemetry
 	if c.Telemetry.OTLPEndpoint == "" {
 		return fmt.Errorf("telemetry.otel_endpoint is required")
 	}
 
-	// logging
 	switch strings.ToLower(c.Logging.Level) {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("logging.level must be one of [debug, info, warn, error]")
 	}
 
-	// http
 	if err := validateHTTP(&c.HTTP); err != nil {
 		return err
-	}
-
-	// processor.intervals
-	if len(c.Processor.Intervals) == 0 {
-		return fmt.Errorf("processor.intervals must contain at least one aggregation interval")
-	}
-	for _, iv := range c.Processor.Intervals {
-		if !isSupportedInterval(iv) {
-			return fmt.Errorf("unsupported aggregation interval: %v", iv)
-		}
 	}
 
 	return nil
@@ -267,49 +240,24 @@ func validateHTTP(h *HTTPConfig) error {
 	if h.Port <= 0 || h.Port > 65535 {
 		return fmt.Errorf("http.port must be between 1 and 65535")
 	}
-	durations := map[string]time.Duration{
+	for name, d := range map[string]time.Duration{
 		"http.read_timeout":     h.ReadTimeout,
 		"http.write_timeout":    h.WriteTimeout,
 		"http.idle_timeout":     h.IdleTimeout,
 		"http.shutdown_timeout": h.ShutdownTimeout,
-	}
-	for k, d := range durations {
+	} {
 		if d <= 0 {
-			return fmt.Errorf("%s must be > 0", k)
+			return fmt.Errorf("%s must be > 0", name)
 		}
 	}
-	paths := map[string]string{
+	for name, p := range map[string]string{
 		"http.metrics_path": h.MetricsPath,
 		"http.healthz_path": h.HealthzPath,
 		"http.readyz_path":  h.ReadyzPath,
-	}
-	for k, p := range paths {
+	} {
 		if !strings.HasPrefix(p, "/") {
-			return fmt.Errorf("%s must start with '/'", k)
+			return fmt.Errorf("%s must start with '/'", name)
 		}
 	}
 	return nil
-}
-
-func isSupportedInterval(iv commonpb.AggregationInterval) bool {
-	switch iv {
-	case commonpb.AggregationInterval_AGG_INTERVAL_1_MINUTE,
-		commonpb.AggregationInterval_AGG_INTERVAL_5_MINUTES,
-		commonpb.AggregationInterval_AGG_INTERVAL_15_MINUTES,
-		commonpb.AggregationInterval_AGG_INTERVAL_1_HOUR,
-		commonpb.AggregationInterval_AGG_INTERVAL_4_HOURS,
-		commonpb.AggregationInterval_AGG_INTERVAL_1_DAY:
-		return true
-	default:
-		return false
-	}
-}
-
-// -----------------------------------------------------------------------------
-// Debug print
-// -----------------------------------------------------------------------------
-
-func (c *Config) Print() {
-	b, _ := json.MarshalIndent(c, "", "  ")
-	fmt.Println("Loaded configuration:\n", string(b))
 }

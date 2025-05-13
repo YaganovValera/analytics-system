@@ -9,50 +9,43 @@ import (
 
 var (
 	once              sync.Once
-	ConsumedMessages  prometheus.Counter
-	AggregationErrors prometheus.Counter
-	CandlesPublished  prometheus.Counter
-	PublishErrors     prometheus.Counter
-	PublishLatency    prometheus.Histogram
+	ProcessedMessages prometheus.Counter
+	ProcessErrors     prometheus.Counter
+	InsertErrors      prometheus.Counter
+	InsertLatency     prometheus.Histogram
 )
 
 // Register initializes and registers all metrics exactly once.
-// If r is nil, uses prometheus.DefaultRegisterer.
-// Duplicate registrations (AlreadyRegisteredError) are ignored.
+// If r == nil, uses prometheus.DefaultRegisterer; duplicate registrations are ignored.
 func Register(r prometheus.Registerer) {
 	once.Do(func() {
 		if r == nil {
 			r = prometheus.DefaultRegisterer
 		}
 
-		ConsumedMessages = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "consumed_messages_total",
-			Help: "Total number of raw messages consumed from Kafka",
+		ProcessedMessages = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "processor", Name: "processed_messages_total",
+			Help: "Total number of MarketData messages processed",
 		})
-		AggregationErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "aggregation_errors_total",
-			Help: "Total number of errors during OHLCV aggregation",
+		ProcessErrors = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "processor", Name: "process_errors_total",
+			Help: "Total number of errors during message processing",
 		})
-		CandlesPublished = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "candles_published_total",
-			Help: "Total number of aggregated candles published to Kafka",
+		InsertErrors = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "processor", Name: "insert_errors_total",
+			Help: "Total number of errors inserting raw data into TimescaleDB",
 		})
-		PublishErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "publish_errors_total",
-			Help: "Total number of errors publishing candles to Kafka",
-		})
-		PublishLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "publish_latency_seconds",
-			Help:    "Latency from aggregation to Kafka publish (seconds)",
+		InsertLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "preprocessor", Subsystem: "processor", Name: "insert_latency_seconds",
+			Help:    "Latency of inserting MarketData into TimescaleDB",
 			Buckets: prometheus.DefBuckets,
 		})
 
 		collectors := []prometheus.Collector{
-			ConsumedMessages,
-			AggregationErrors,
-			CandlesPublished,
-			PublishErrors,
-			PublishLatency,
+			ProcessedMessages,
+			ProcessErrors,
+			InsertErrors,
+			InsertLatency,
 		}
 		for _, c := range collectors {
 			if err := r.Register(c); err != nil {

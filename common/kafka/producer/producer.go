@@ -109,30 +109,13 @@ var tracer = otel.Tracer("kafka-producer")
 //
 // Zero values are replaced with sane defaults by applyDefaults().
 type Config struct {
-	// Brokers — список адресов Kafka-брокеров.
-	Brokers []string
-
-	// RequiredAcks определяет стратегию подтверждения брокеров:
-	//   "all" (дефолт) | "leader" | "none".
-	RequiredAcks string
-
-	// Timeout — максимальное время ожидания ack от кластера.
-	Timeout time.Duration
-
-	// Compression указывает алгоритм сжатия:
-	//   "none" (дефолт), "gzip", "snappy", "lz4", "zstd".
-	Compression string
-
-	// FlushFrequency — периодическое «смывание» буфера продьюсера.
-	// Ноль → disable.
+	Brokers        []string
+	RequiredAcks   string
+	Timeout        time.Duration
+	Compression    string
 	FlushFrequency time.Duration
-
-	// FlushMessages — пороговое кол-во сообщений для смыва.
-	// Ноль → disable.
-	FlushMessages int
-
-	// Backoff описывает стратегию ретраев подключения и отправки.
-	Backoff backoff.Config
+	FlushMessages  int
+	Backoff        backoff.Config
 }
 
 // applyDefaults заполняет zero-полям безопасные дефолты.

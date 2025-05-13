@@ -58,6 +58,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		ReadTimeout:      cfg.Binance.ReadTimeout,
 		SubscribeTimeout: cfg.Binance.SubscribeTimeout,
 		BackoffConfig:    cfg.Binance.Backoff,
+		BufferSize:       cfg.Binance.BufferSize,
 	}, log)
 	if err != nil {
 		return fmt.Errorf("binance connector init: %w", err)

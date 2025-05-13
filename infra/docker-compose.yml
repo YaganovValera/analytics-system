@@ -1,9 +1,10 @@
+
 networks:
   backend:
 
 services:
   # ------------------------------------------------------------------------ #
-  #  Core infra                                                               #
+  #  Core infra                                                              #
   # ------------------------------------------------------------------------ #
   zookeeper:
     image: bitnami/zookeeper:3.8
@@ -31,14 +32,14 @@ services:
     networks:
       - backend
 
-  redis:
-    image: redis:7-alpine
-    command:
-      - redis-server
-      - --save
-      - ""
-      - --appendonly
-      - "no"
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: analytics
+    ports:
+      - "5432:5432"
     networks:
       - backend
 
@@ -113,13 +114,13 @@ services:
       dockerfile: services/preprocessor/Dockerfile
     depends_on:
       - kafka
-      - redis
+      - timescaledb
       - otel-collector
     ports:
       - "8090:8090"
     environment:
       PREPROCESSOR_KAFKA_BROKERS: kafka:9092
-      PREPROCESSOR_REDIS_URL: redis://redis:6379/0
+      PREPROCESSOR_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
       PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
       PREPROCESSOR_TELEMETRY_INSECURE: "true"
       OTEL_SERVICE_NAME: preprocessor

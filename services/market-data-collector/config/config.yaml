@@ -16,6 +16,7 @@ binance:
     - "btcusdt@trade"
     # - "ethusdt@depth"
 
+
   # Таймауты и стратегия back-off
   read_timeout:       "30s"   # без pong → разрыв соединения
   subscribe_timeout:  "5s"    # ожидание ответа SUBSCRIBE
@@ -23,7 +24,7 @@ binance:
     initial_interval:  "1s"
     max_interval:      "30s"
     max_elapsed_time:  "5m"
-    # остальные поля (randomization_factor, multiplier) идут по дефолту
+  buffer_size: 10000
 
 # ------------------------------------------------------------------------------
 #  Kafka Producer
@@ -57,7 +58,7 @@ telemetry:
 #  Логирование
 # ------------------------------------------------------------------------------
 logging:
-  level:    "debug"              # debug | info | warn | error
+  level:    "info"              # debug | info | warn | error
   dev_mode: false               # true → человекочитаемый вывод
 
 # ------------------------------------------------------------------------------

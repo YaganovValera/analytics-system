@@ -1,0 +1,27 @@
+service_name:    "analytics-api"
+service_version: "v1.0.0"
+
+http:
+  port:               9090
+  read_timeout:       "10s"
+  write_timeout:      "15s"
+  idle_timeout:       "60s"
+  shutdown_timeout:   "5s"
+  metrics_path:       "/metrics"
+  healthz_path:       "/healthz"
+  readyz_path:        "/readyz"
+
+postgres:
+  dsn:               "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+  max_open_conns:    10
+  max_idle_conns:    5
+  conn_max_lifetime: "1h"
+
+telemetry:
+  otel_endpoint:    "otel-collector:4317"
+  insecure:         false
+  sampler:          1.0
+
+logging:
+  level:    "info"
+  dev_mode: false
