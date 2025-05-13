@@ -1,5 +1,4 @@
 // common/httpserver/server.go
-
 package httpserver
 
 import (
@@ -17,9 +16,9 @@ import (
 // ReadyChecker returns nil if the service is ready to serve.
 type ReadyChecker func() error
 
-// HTTPServer defines Start(context) error.
+// HTTPServer defines Run(context) error.
 type HTTPServer interface {
-	Start(ctx context.Context) error
+	Run(ctx context.Context) error
 }
 
 // Config defines timeouts and paths for the HTTP server.
@@ -68,12 +67,11 @@ func (c Config) validate() error {
 type server struct {
 	httpServer      *http.Server
 	shutdownTimeout time.Duration
-	check           ReadyChecker
 	log             *logger.Logger
 }
 
-// New constructs an HTTPServer with metrics and health endpoints.
-func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error) {
+// New constructs an HTTPServer with metrics and health endpoints, plus extra routes.
+func New(cfg Config, check ReadyChecker, log *logger.Logger, extra map[string]http.Handler) (HTTPServer, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -87,6 +85,7 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error)
 	})
 	mux.HandleFunc(cfg.ReadyzPath, func(w http.ResponseWriter, _ *http.Request) {
 		if err := check(); err != nil {
+			log.Warn("http: readyz check failed", zap.Error(err))
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(fmt.Sprintf("NOT READY: %v", err)))
 			return
@@ -94,6 +93,10 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("READY"))
 	})
+
+	for path, handler := range extra {
+		mux.Handle(path, handler)
+	}
 
 	httpSrv := &http.Server{
 		Addr:         cfg.Addr,
@@ -106,15 +109,13 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger) (HTTPServer, error)
 	return &server{
 		httpServer:      httpSrv,
 		shutdownTimeout: cfg.ShutdownTimeout,
-		check:           check,
 		log:             log.Named("http-server"),
 	}, nil
 }
 
-// Start runs ListenAndServe and gracefully shuts down on ctx.Done().
-func (s *server) Start(ctx context.Context) error {
+// Run starts the server and shuts down gracefully on context cancellation.
+func (s *server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
-
 	go func() {
 		s.log.Info("http: starting server", zap.String("addr", s.httpServer.Addr))
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -140,7 +141,6 @@ func (s *server) Start(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("http: server stopped gracefully")
-
 	s.log.Sync()
 	return serveErr
 }

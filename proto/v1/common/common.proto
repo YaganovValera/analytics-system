@@ -1,56 +1,55 @@
-// proto/v1/common/common.proto
 syntax = "proto3";
 
 package market.common.v1;
-option go_package = "github.com/YaganovValera/analytics-system/proto/v1/common;commonpb";
+option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/common;commonpb";
 
+import "google/protobuf/timestamp.proto";
+import "google/rpc/status.proto";
 
-// ErrorCode defines standard error codes for streaming operations.
-enum ErrorCode {
-  OK = 0;
-  UNAVAILABLE = 1;
-  INTERNAL = 2;
-  TIMEOUT = 3;
-  INVALID_ARGUMENT = 4;
-  UNAUTHORIZED = 5;
+// Pagination parameters for paginated API responses.
+message Pagination {
+  // Number of results to return per page.
+  int32 page_size = 1;
+
+  // Token to retrieve the next page of results.
+  string page_token = 2;
 }
 
-// StreamError represents an error in a data stream.
-message StreamError {
-  ErrorCode code = 1;
-  string message = 2;
+// Metadata provided with every request for observability and tracing.
+message RequestMetadata {
+  // IP address of the client.
+  string ip_address = 1;
+
+  // User agent string.
+  string user_agent = 2;
+
+  // Trace ID for distributed tracing systems (e.g. OpenTelemetry).
+  string trace_id = 3;
 }
 
-// AggregationInterval specifies intervals for historical data aggregation.
+// Supported aggregation intervals for analytics queries.
 enum AggregationInterval {
   AGG_INTERVAL_UNSPECIFIED = 0;
-  AGG_INTERVAL_1_MINUTE    = 1;
-  AGG_INTERVAL_5_MINUTES   = 2;
-  AGG_INTERVAL_15_MINUTES  = 3;
-  AGG_INTERVAL_1_HOUR      = 4;
-  AGG_INTERVAL_4_HOURS     = 5;
-  AGG_INTERVAL_1_DAY       = 6;
+  AGG_INTERVAL_1_MINUTE = 1;
+  AGG_INTERVAL_5_MINUTES = 2;
+  AGG_INTERVAL_15_MINUTES = 3;
+  AGG_INTERVAL_1_HOUR = 4;
+  AGG_INTERVAL_4_HOURS = 5;
+  AGG_INTERVAL_1_DAY = 6;
 }
 
-// Pagination parameters for paginated requests.
-message Pagination {
-  int32 page_size   = 1;  // Maximum number of items to return
-  string page_token = 2;  // Token for the next page
-}
-
-// Request for paginated symbol discovery.
+// Request to retrieve a paginated list of available market symbols.
 message ListSymbolsRequest {
   Pagination pagination = 1;
+  RequestMetadata metadata = 2;
 }
 
-// Response for symbol discovery.
+// Response containing available market symbols.
 message ListSymbolsResponse {
-  repeated string symbols        = 1;  // Available trading symbols
-  string           next_page_token = 2;  // Token for next page of symbols
+  repeated string symbols = 1;
+  string next_page_token = 2;
 }
 
-// CommonService provides discovery and utility methods.
 service CommonService {
   rpc ListSymbols(ListSymbolsRequest) returns (ListSymbolsResponse);
 }
-

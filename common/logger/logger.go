@@ -1,31 +1,15 @@
+// common/logger/logger.go
 package logger
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/YaganovValera/analytics-system/common/ctxkeys"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-// -----------------------------------------------------------------------------
-// context keys
-// -----------------------------------------------------------------------------
-
-type contextKey string
-
-const (
-	traceIDKey   contextKey = "trace_id"
-	requestIDKey contextKey = "request_id"
-)
-
-// -----------------------------------------------------------------------------
-// Config & setup
-// -----------------------------------------------------------------------------
-
-// Config описывает, как инициализировать zap-логгер.
-// Level   — debug | info | warn | error (по умолчанию info)
-// DevMode — true → человекочитаемый вывод, иначе JSON.
 type Config struct {
 	Level   string
 	DevMode bool
@@ -45,16 +29,10 @@ func (c Config) validate() error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// Logger wrapper
-// -----------------------------------------------------------------------------
-
-// Logger — тонкая обёртка над *zap.Logger.
 type Logger struct {
 	raw *zap.Logger
 }
 
-// New создаёт новый Logger по заданному Config.
 func New(cfg Config) (*Logger, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
@@ -73,8 +51,6 @@ func New(cfg Config) (*Logger, error) {
 	return &Logger{raw: zl}, nil
 }
 
-// Init — вынесенный «паникующий» конструктор для bootstrap.
-// Если конфиг невалиден, приложение упадёт сразу (иначе дальше валидных логов не будет).
 func Init(level string, devMode bool) *Logger {
 	log, err := New(Config{Level: level, DevMode: devMode})
 	if err != nil {
@@ -83,57 +59,19 @@ func Init(level string, devMode bool) *Logger {
 	return log
 }
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-func buildZapConfig(dev bool) zap.Config {
-	if dev {
-		cfg := zap.NewDevelopmentConfig()
-		ec := &cfg.EncoderConfig
-		ec.TimeKey = "ts"
-		ec.EncodeTime = zapcore.ISO8601TimeEncoder
-		ec.CallerKey = "caller"
-		ec.EncodeCaller = zapcore.ShortCallerEncoder
-		return cfg
-	}
-
-	prod := zap.NewProductionConfig()
-	prod.Sampling = &zap.SamplingConfig{Initial: 100, Thereafter: 100}
-	ec := &prod.EncoderConfig
-	ec.TimeKey = "ts"
-	ec.EncodeTime = zapcore.ISO8601TimeEncoder
-	ec.CallerKey = "caller"
-	ec.EncodeCaller = zapcore.ShortCallerEncoder
-	ec.StacktraceKey = "stacktrace"
-	return prod
-}
-
-func setZapLevel(cfg *zap.Config, level string) error {
-	var lvl zapcore.Level
-	if err := lvl.UnmarshalText([]byte(level)); err != nil {
-		return err
-	}
-	cfg.Level = zap.NewAtomicLevelAt(lvl)
-	return nil
-}
-
-// -----------------------------------------------------------------------------
-// Context helpers & methods
-// -----------------------------------------------------------------------------
-
 func (l *Logger) Sync() { _ = l.raw.Sync() }
+
 func (l *Logger) Named(name string) *Logger {
 	return &Logger{raw: l.raw.Named(name)}
 }
 
 func (l *Logger) WithContext(ctx context.Context) *Logger {
 	fields := make([]zap.Field, 0, 2)
-	if v, ok := ctx.Value(traceIDKey).(string); ok {
-		fields = append(fields, zap.String(string(traceIDKey), v))
+	if v, ok := ctx.Value(ctxkeys.TraceIDKey).(string); ok {
+		fields = append(fields, zap.String("trace_id", v))
 	}
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		fields = append(fields, zap.String(string(requestIDKey), v))
+	if v, ok := ctx.Value(ctxkeys.RequestIDKey).(string); ok {
+		fields = append(fields, zap.String("request_id", v))
 	}
 	if len(fields) == 0 {
 		return l
@@ -146,9 +84,6 @@ func (l *Logger) Info(msg string, fields ...zap.Field)  { l.raw.Info(msg, fields
 func (l *Logger) Warn(msg string, fields ...zap.Field)  { l.raw.Warn(msg, fields...) }
 func (l *Logger) Error(msg string, fields ...zap.Field) { l.raw.Error(msg, fields...) }
 
-func ContextWithTraceID(ctx context.Context, tid string) context.Context {
-	return context.WithValue(ctx, traceIDKey, tid)
-}
-func ContextWithRequestID(ctx context.Context, rid string) context.Context {
-	return context.WithValue(ctx, requestIDKey, rid)
+func (l *Logger) Sugar() *zap.SugaredLogger {
+	return l.raw.Sugar()
 }

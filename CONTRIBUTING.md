@@ -40,7 +40,7 @@ Analytics System — облачная платформа для сбора, об
 - **gRPC & Protobuf** (protoc v3.21.x, protoc-gen-go v1.36.6)  
 - **Kafka**: Sarama v1.45.1, otelsarama  
 - **Redis**: go-redis/redis v8.11.5  
-- **PostgreSQL**: pgx/v5.5.0 или lib/pq v1.13.0  
+- **PostgreSQL**: pgx/v5.5.0 или lib/pq v1.13.0  и обязательно TimescaleDB 
 - **Zap** v1.27.0  
 - **OpenTelemetry** v1.35.0  
 - **Prometheus client_golang** v1.22.0  

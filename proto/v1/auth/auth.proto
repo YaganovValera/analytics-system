@@ -1,73 +1,73 @@
-// proto/v1/auth.proto
 syntax = "proto3";
 
 package market.auth.v1;
-option go_package = "github.com/YaganovValera/analytics-system/proto/v1/auth;authpb";
+option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth;authpb";
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import "v1/common/common.proto";
 
-// LoginRequest is the request for user authentication.
+// Request for user login with credentials.
 message LoginRequest {
   string username = 1;
   string password = 2;
+  market.common.v1.RequestMetadata metadata = 3;
 }
 
-// LoginResponse returns the issued tokens and expiry.
+// Response with access and refresh tokens.
 message LoginResponse {
-  string access_token  = 1;
+  string access_token = 1;
   string refresh_token = 2;
-  int64  expires_in     = 3; // seconds until expiry
+  int64 expires_in = 3; // In seconds
 }
 
-// ValidateTokenRequest checks an access token's validity.
+// Request to validate a token.
 message ValidateTokenRequest {
   string token = 1;
 }
 
-// ValidateTokenResponse indicates token validity, metadata, and expiry.
+// Response with token validation details.
 message ValidateTokenResponse {
-  bool                      valid      = 1;
-  string                    username   = 2;
-  repeated string           roles      = 3;
+  bool valid = 1;
+  string username = 2;
+  repeated string roles = 3;
   google.protobuf.Timestamp expires_at = 4;
 }
 
-// RefreshTokenRequest requests new tokens.
+// Request to refresh access token using refresh token.
 message RefreshTokenRequest {
   string refresh_token = 1;
 }
 
-// RefreshTokenResponse returns refreshed tokens and expiry.
+// Response with refreshed tokens.
 message RefreshTokenResponse {
-  string access_token  = 1;
+  string access_token = 1;
   string refresh_token = 2;
-  int64  expires_in     = 3;
+  int64 expires_in = 3;
 }
 
-// TokenType distinguishes access vs refresh tokens.
+// Enum describing token type to revoke.
 enum TokenType {
   TOKEN_TYPE_UNSPECIFIED = 0;
-  ACCESS                 = 1;
-  REFRESH                = 2;
+  ACCESS = 1;
+  REFRESH = 2;
 }
 
-// RevokeTokenRequest invalidates a given token.
+// Request to revoke a specific token.
 message RevokeTokenRequest {
-  string    token = 1;
-  TokenType type  = 2;
+  string token = 1;
+  TokenType type = 2;
 }
 
-// RevokeTokenResponse indicates if revocation succeeded.
+// Response confirming revocation.
 message RevokeTokenResponse {
   bool revoked = 1;
 }
 
-// AuthService provides authentication and authorization.
 service AuthService {
-  rpc Login(LoginRequest)                 returns (LoginResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
-  rpc RefreshToken(RefreshTokenRequest)   returns (RefreshTokenResponse);
-  rpc Logout(google.protobuf.Empty)       returns (google.protobuf.Empty);
-  rpc RevokeToken(RevokeTokenRequest)     returns (RevokeTokenResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
 }

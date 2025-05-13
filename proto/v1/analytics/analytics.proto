@@ -1,52 +1,49 @@
-// proto/v1/analytics.proto
 syntax = "proto3";
 
 package market.analytics.v1;
-option go_package = "github.com/YaganovValera/analytics-system/proto/v1/analytics;analyticspb";
+option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics;analyticspb";
 
 import "google/protobuf/timestamp.proto";
-import "common/common.proto";
+import "google/rpc/status.proto";
+import "v1/common/common.proto";
 
-// Candle represents a single OHLCV data point.
+// OHLCV candle data point.
 message Candle {
-  google.protobuf.Timestamp open_time  = 1;
+  google.protobuf.Timestamp open_time = 1;
   google.protobuf.Timestamp close_time = 2;
-  string symbol                        = 3;
-  double open                          = 4;
-  double high                          = 5;
-  double low                           = 6;
-  double close                         = 7;
-  double volume                        = 8;
+  string symbol = 3;
+  double open = 4;
+  double high = 5;
+  double low = 6;
+  double close = 7;
+  double volume = 8;
 }
 
-// Request for paginated historical candles.
+// Request to retrieve historical candle data.
 message GetCandlesRequest {
-  string symbol                             = 1;
-  google.protobuf.Timestamp start           = 2;
-  google.protobuf.Timestamp end             = 3;
+  string symbol = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
   market.common.v1.AggregationInterval interval = 4;
-  market.common.v1.Pagination pagination         = 5;
+  market.common.v1.Pagination pagination = 5;
+  market.common.v1.RequestMetadata metadata = 6;
 }
 
-// Response containing a page of historical candles.
+// Response with paginated candle data.
 message GetCandlesResponse {
-  repeated Candle candles     = 1;
-  string         next_page_token = 2;
+  repeated Candle candles = 1;
+  string next_page_token = 2;
 }
 
-// Streaming event wrapper for Candle or error.
+// Streaming response with candles and errors.
 message CandleEvent {
   oneof payload {
-    Candle                   candle       = 1;
-    market.common.v1.StreamError stream_error = 2;
+    Candle candle = 1;
+    google.rpc.Status error = 2;
   }
 }
 
-// AnalyticsService provides historical and streaming candle data.
 service AnalyticsService {
-  // Returns a page of historical candles matching the request.
   rpc GetCandles(GetCandlesRequest) returns (GetCandlesResponse);
-
-  // Streams candles (with errors) for the requested range.
   rpc StreamCandles(GetCandlesRequest) returns (stream CandleEvent);
 }

@@ -1,5 +1,4 @@
 // common/telemetry/otel.go
-
 package telemetry
 
 import (
@@ -13,20 +12,17 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
 
-// -----------------------------------------------------------------------------
-// Configuration
-// -----------------------------------------------------------------------------
-
 // Config содержит параметры для инициализации OpenTelemetry.
 type Config struct {
-	Endpoint        string        // OTLP-collector "host:port" (обязательно)
-	ServiceName     string        // имя сервиса (обязательно)
-	ServiceVersion  string        // версия сборки (обязательно)
+	Endpoint        string        // OTLP-collector "host:port"
+	ServiceName     string        // имя сервиса
+	ServiceVersion  string        // версия сборки
 	Insecure        bool          // true → gRPC без TLS
 	ReconnectPeriod time.Duration // период ребута экспортёра
 	Timeout         time.Duration // таймаут Init/Shutdown
@@ -40,7 +36,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.ReconnectPeriod <= 0 {
 		cfg.ReconnectPeriod = 5 * time.Second
 	}
-	// Разрешаем SamplerRatio==0 (отключение трассинга)
 	if cfg.SamplerRatio < 0 || cfg.SamplerRatio > 1 {
 		cfg.SamplerRatio = 1
 	}
@@ -61,12 +56,7 @@ func validateConfig(cfg Config) error {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Public API
-// -----------------------------------------------------------------------------
-
-// InitTracer инициализирует глобальный TracerProvider.
-// Возвращает функцию Shutdown, которую нужно вызвать при остановке.
+// InitTracer инициализирует глобальный TracerProvider и возвращает Shutdown-функцию.
 func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(context.Context) error, error) {
 	applyDefaults(&cfg)
 	if err := validateConfig(cfg); err != nil {
@@ -78,37 +68,29 @@ func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(conte
 
 	exp, err := newExporter(initCtx, cfg)
 	if err != nil {
-		log.Error("telemetry: exporter creation failed",
-			zap.Error(err),
-			zap.Any("config", cfg),
-		)
+		log.Error("telemetry: exporter creation failed", zap.Error(err), zap.Any("config", cfg))
 		return nil, fmt.Errorf("telemetry: exporter: %w", err)
 	}
 
 	res, err := newResource(cfg)
 	if err != nil {
-		log.Error("telemetry: resource creation failed",
-			zap.Error(err),
-			zap.Any("config", cfg),
-		)
+		log.Error("telemetry: resource creation failed", zap.Error(err), zap.Any("config", cfg))
 		return nil, fmt.Errorf("telemetry: resource: %w", err)
 	}
 
 	tp := newTracerProvider(exp, res, cfg)
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(
-		propagation.NewCompositeTextMapPropagator(
-			propagation.TraceContext{},
-			propagation.Baggage{},
-		),
-	)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	log.Info("telemetry: initialized",
 		zap.String("service", cfg.ServiceName),
 		zap.String("version", cfg.ServiceVersion),
 	)
 
-	shutdown := func(ctx context.Context) error {
+	return func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 		if err := tp.Shutdown(ctx); err != nil {
@@ -117,13 +99,12 @@ func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(conte
 		}
 		log.Info("telemetry: shutdown complete")
 		return nil
-	}
-	return shutdown, nil
+	}, nil
 }
 
-// -----------------------------------------------------------------------------
-// Internal helpers
-// -----------------------------------------------------------------------------
+func Tracer() trace.Tracer {
+	return otel.Tracer("default")
+}
 
 func newExporter(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
 	opts := []otlptracegrpc.Option{

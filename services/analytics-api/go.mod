@@ -1,4 +1,4 @@
-module github.com/YaganovValera/analytics-system/analytics-api
+module github.com/YaganovValera/analytics-system/services/analytics-api
 
 go 1.23.0
 

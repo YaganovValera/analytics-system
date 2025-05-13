@@ -1,5 +1,4 @@
 // common/backoff/backoff.go
-
 package backoff
 
 import (
@@ -14,10 +13,6 @@ import (
 
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
-
-// -----------------------------------------------------------------------------
-// Metrics & service label
-// -----------------------------------------------------------------------------
 
 var (
 	serviceLabel = "unknown"
@@ -60,15 +55,10 @@ var (
 	}
 )
 
-// SetServiceLabel must be called once from common.InitServiceName(..)
-// before the first Execute(..).
-func SetServiceLabel(name string) { serviceLabel = name }
+func SetServiceLabel(name string) {
+	serviceLabel = name
+}
 
-// -----------------------------------------------------------------------------
-// Configuration
-// -----------------------------------------------------------------------------
-
-// Config contains tunables for exponential back-off.
 type Config struct {
 	InitialInterval     time.Duration
 	RandomizationFactor float64
@@ -106,10 +96,8 @@ func (c Config) validate() error {
 	return nil
 }
 
-// RetryableFunc is a unit of work that may be re-executed until it succeeds or the back-off strategy gives up.
 type RetryableFunc func(ctx context.Context) error
 
-// ErrMaxRetries is returned when all retry attempts fail.
 type ErrMaxRetries struct {
 	Err      error
 	Attempts int
@@ -118,14 +106,13 @@ type ErrMaxRetries struct {
 func (e *ErrMaxRetries) Error() string {
 	return fmt.Sprintf("backoff: %d attempt(s) failed: %v", e.Attempts, e.Err)
 }
+
 func (e *ErrMaxRetries) Unwrap() error { return e.Err }
 func Permanent(err error) error        { return cbackoff.Permanent(err) }
 
-// Execute runs fn() with exponential back-off, emitting Prometheus metrics and structured logs.
 func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFunc) error {
-	// Warn if service label was not set.
 	if serviceLabel == "unknown" {
-		log.Error("backoff: service label not set — call SetServiceLabel once at startup")
+		log.Warn("backoff: service label not set", zap.String("service", serviceLabel))
 	}
 
 	cfg.applyDefaults()
@@ -153,10 +140,11 @@ func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFu
 		}
 		return fn(ctx)
 	}
+
 	notify := func(err error, delay time.Duration) {
 		metrics.Retries.WithLabelValues(serviceLabel).Inc()
 		metrics.Delays.WithLabelValues(serviceLabel).Observe(delay.Seconds())
-		log.Warn("back-off retry",
+		log.WithContext(ctx).Warn("back-off retry",
 			zap.Int("attempt", attempts),
 			zap.Duration("delay", delay),
 			zap.Error(err),
@@ -165,7 +153,7 @@ func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFu
 
 	if err := cbackoff.RetryNotify(operation, boCtx, notify); err != nil {
 		metrics.Failures.WithLabelValues(serviceLabel).Inc()
-		log.Error("back-off give-up",
+		log.WithContext(ctx).Error("back-off give-up",
 			zap.Int("attempts", attempts),
 			zap.Error(err),
 		)

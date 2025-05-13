@@ -259,18 +259,27 @@ func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Produ
 	}, nil
 }
 
-// Publish отправляет сообщение в Kafka c ретраями.
-func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []byte) error {
-	ctxPub, span := tracer.Start(ctx, "Publish", trace.WithAttributes(attribute.String("topic", topic)))
+func (k *kafkaProducer) PublishMessage(ctx context.Context, msg *commonkafka.Message) error {
+	ctxPub, span := tracer.Start(ctx, "PublishMessage", trace.WithAttributes(
+		attribute.String("topic", msg.Topic),
+	))
 	start := time.Now()
 
 	send := func(ctx context.Context) error {
-		msg := &sarama.ProducerMessage{
-			Topic: topic,
-			Key:   sarama.ByteEncoder(key),
-			Value: sarama.ByteEncoder(value),
+		pmsg := &sarama.ProducerMessage{
+			Topic: msg.Topic,
+			Key:   sarama.ByteEncoder(msg.Key),
+			Value: sarama.ByteEncoder(msg.Value),
 		}
-		_, _, err := k.prod.SendMessage(msg)
+
+		for k, v := range msg.Headers {
+			pmsg.Headers = append(pmsg.Headers, sarama.RecordHeader{
+				Key:   []byte(k),
+				Value: v,
+			})
+		}
+
+		_, _, err := k.prod.SendMessage(pmsg)
 		return err
 	}
 
@@ -281,18 +290,25 @@ func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []
 	if err != nil {
 		producerMetrics.PublishErrors.WithLabelValues(serviceLabel).Inc()
 		span.RecordError(err)
-		k.logger.Error("publish failed", zap.String("topic", topic), zap.Error(err))
+		k.logger.Error("publish failed", zap.String("topic", msg.Topic), zap.Error(err))
 		span.End()
 		return err
 	}
 
 	producerMetrics.PublishSuccess.WithLabelValues(serviceLabel).Inc()
-	k.logger.Debug("publish succeeded",
-		zap.String("topic", topic),
-		zap.Float64("latency_s", latency.Seconds()),
-	)
+	k.logger.Debug("publish succeeded", zap.String("topic", msg.Topic), zap.Float64("latency_s", latency.Seconds()))
 	span.End()
 	return nil
+}
+
+// Publish отправляет сообщение в Kafka c ретраями.
+func (k *kafkaProducer) Publish(ctx context.Context, topic string, key, value []byte) error {
+	msg := &commonkafka.Message{
+		Topic: topic,
+		Key:   key,
+		Value: value,
+	}
+	return k.PublishMessage(ctx, msg)
 }
 
 // Ping обновляет метаданные клиента, проверяя доступность кластера.

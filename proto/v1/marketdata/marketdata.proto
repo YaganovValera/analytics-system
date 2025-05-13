@@ -1,90 +1,92 @@
-// proto/v1/marketdata/marketdata.proto
 syntax = "proto3";
 
 package market.marketdata.v1;
-option go_package = "github.com/YaganovValera/analytics-system/proto/v1/marketdata;marketdatapb";
+option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/marketdata;marketdatapb";
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/empty.proto";
+import "google/rpc/status.proto";
+import "v1/common/common.proto";
 
-import "common/common.proto";
-
-// MarketData represents a raw trade event.
+// Market trade data point.
 message MarketData {
   google.protobuf.Timestamp timestamp = 1;
-  string symbol                       = 2;
-  double price                        = 3;
-  double bid_price                    = 4;
-  double ask_price                    = 5;
-  double volume                       = 6;
-  string trade_id                     = 7;
+  string symbol = 2;
+  double price = 3;
+  double bid_price = 4;
+  double ask_price = 5;
+  double volume = 6;
+  string trade_id = 7;
 }
 
-// OrderBookLevel is one price level in the order book.
+// Price level within an order book.
 message OrderBookLevel {
-  double price    = 1;
+  double price = 1;
   double quantity = 2;
 }
 
-// OrderBookSnapshot is a snapshot of top-N levels.
+// Snapshot of the order book at a specific point in time.
 message OrderBookSnapshot {
   google.protobuf.Timestamp timestamp = 1;
-  string symbol                       = 2;
-  repeated OrderBookLevel bids       = 3;
-  repeated OrderBookLevel asks       = 4;
+  string symbol = 2;
+  repeated OrderBookLevel bids = 3;
+  repeated OrderBookLevel asks = 4;
 }
 
-// Wrapper for data or error in streaming.
+// Filter to subscribe or query market data for a specific symbol.
+message MarketDataFilter {
+  string symbol = 1;
+  market.common.v1.RequestMetadata metadata = 2;
+}
+
+// Streamed response for trade data.
 message MarketDataEvent {
   oneof payload {
-    MarketData                 data         = 1;
-    market.common.v1.StreamError  stream_error = 2;
+    MarketData data = 1;
+    google.rpc.Status error = 2;
   }
 }
 
+// Streamed response for order book updates.
 message OrderBookEvent {
   oneof payload {
-    OrderBookSnapshot          data         = 1;
-    market.common.v1.StreamError  stream_error = 2;
+    OrderBookSnapshot data = 1;
+    google.rpc.Status error = 2;
   }
 }
 
-// Request for paginated historical market data.
+// Request to retrieve historical market trade data.
 message GetMarketDataRequest {
-  string symbol                       = 1;
-  google.protobuf.Timestamp start     = 2;
-  google.protobuf.Timestamp end       = 3;
+  string symbol = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
   market.common.v1.Pagination pagination = 4;
+  market.common.v1.RequestMetadata metadata = 5;
 }
 
-// Response containing a page of market data.
+// Response with paginated historical trade data.
 message GetMarketDataResponse {
-  repeated MarketData data         = 1;
-  string            next_page_token = 2;
+  repeated MarketData data = 1;
+  string next_page_token = 2;
 }
 
-// Request for paginated historical order book snapshots.
+// Request to retrieve historical order book snapshots.
 message GetOrderBookRequest {
-  string symbol                       = 1;
-  google.protobuf.Timestamp start     = 2;
-  google.protobuf.Timestamp end       = 3;
+  string symbol = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
   market.common.v1.Pagination pagination = 4;
+  market.common.v1.RequestMetadata metadata = 5;
 }
 
-// Response containing a page of order book snapshots.
+// Response with paginated order book snapshots.
 message GetOrderBookResponse {
-  repeated OrderBookSnapshot snapshots      = 1;
-  string                     next_page_token = 2;
+  repeated OrderBookSnapshot snapshots = 1;
+  string next_page_token = 2;
 }
 
-// MarketDataService provides both streaming and historical data.
 service MarketDataService {
-  // Streams live market data events.
-  rpc StreamMarketData(google.protobuf.Empty) returns (stream MarketDataEvent);
-  // Streams live order book snapshots.
-  rpc StreamOrderBook(google.protobuf.Empty) returns (stream OrderBookEvent);
-  // Returns a page of historical market data.
+  rpc StreamMarketData(MarketDataFilter) returns (stream MarketDataEvent);
+  rpc StreamOrderBook(MarketDataFilter) returns (stream OrderBookEvent);
   rpc GetMarketData(GetMarketDataRequest) returns (GetMarketDataResponse);
-  // Returns a page of historical order book snapshots.
   rpc GetOrderBook(GetOrderBookRequest) returns (GetOrderBookResponse);
 }

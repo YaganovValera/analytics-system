@@ -1,11 +1,10 @@
-
 networks:
   backend:
 
 services:
-  # ------------------------------------------------------------------------ #
-  #  Core infra                                                              #
-  # ------------------------------------------------------------------------ #
+  # ------------------------------------------------------------------------
+  #  Core infra
+  # ------------------------------------------------------------------------
   zookeeper:
     image: bitnami/zookeeper:3.8
     environment:
@@ -83,9 +82,9 @@ services:
     networks:
       - backend
 
-  # ------------------------------------------------------------------------ #
-  #  Application services                                                    #
-  # ------------------------------------------------------------------------ #
+  # ------------------------------------------------------------------------
+  #  Application services
+  # ------------------------------------------------------------------------
   market-data-collector:
     build:
       context: ../
@@ -124,6 +123,29 @@ services:
       PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
       PREPROCESSOR_TELEMETRY_INSECURE: "true"
       OTEL_SERVICE_NAME: preprocessor
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+    restart: always
+    networks:
+      - backend
+
+  analytics-api:
+    build:
+      context: ../
+      dockerfile: services/analytics-api/Dockerfile
+    depends_on:
+      - kafka
+      - timescaledb
+      - otel-collector
+    ports:
+      - "9090:9090"
+    environment:
+      ANALYTICS_API_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+      ANALYTICS_API_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
+      ANALYTICS_API_TELEMETRY_INSECURE: "true"
+      OTEL_SERVICE_NAME: analytics-api
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
       OTEL_TRACES_SAMPLER: parentbased_traceidratio

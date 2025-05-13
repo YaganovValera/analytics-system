@@ -215,13 +215,24 @@ func (h *consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, cl
 				attribute.Int64("offset", m.Offset),
 			),
 		)
+
+		headers := make(map[string][]byte, len(m.Headers))
+		for _, hdr := range m.Headers {
+			if hdr != nil && hdr.Key != nil && hdr.Value != nil {
+				headers[string(hdr.Key)] = hdr.Value
+			}
+		}
+
 		msg := &commonkafka.Message{
 			Key:       m.Key,
 			Value:     m.Value,
 			Topic:     m.Topic,
 			Partition: m.Partition,
 			Offset:    m.Offset,
+			Timestamp: m.Timestamp,
+			Headers:   headers,
 		}
+
 		if err := h.handler(msg); err != nil {
 			span.RecordError(err)
 			h.log.WithContext(ctxMsg).Error("handler error", zap.Error(err))

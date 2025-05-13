@@ -13,6 +13,7 @@ import (
 	analyticspb "github.com/YaganovValera/analytics-system/proto/v1/analytics"
 	commonpb "github.com/YaganovValera/analytics-system/proto/v1/common"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/config"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics"
 )
 
 // Repository определяет интерфейс доступа к данным свечей.
@@ -26,13 +27,14 @@ type Repository interface {
 		pageToken string,
 	) (candles []*analyticspb.Candle, nextPageToken string, err error)
 
-	// StreamCandles возвращает канал событий: либо Candle, либо StreamError.
 	StreamCandles(
 		ctx context.Context,
 		symbol string,
 		start, end time.Time,
 		interval commonpb.AggregationInterval,
 	) (<-chan *analyticspb.CandleEvent, error)
+
+	Ping(ctx context.Context) error
 }
 
 type postgresRepo struct {
@@ -74,21 +76,20 @@ func (r *postgresRepo) GetCandles(
 	pageSize int,
 	pageToken string,
 ) ([]*analyticspb.Candle, string, error) {
-	// pageToken — ISO8601 timestamp of the last open_time from previous page
+	metrics.GetCandlesRequests.Inc()
+	// Распарсим pageToken как предыдущий open_time, если есть.
 	var after time.Time
 	if pageToken != "" {
 		t, err := time.Parse(time.RFC3339Nano, pageToken)
 		if err != nil {
+			metrics.GetCandlesErrors.Inc()
 			return nil, "", fmt.Errorf("invalid page_token: %w", err)
 		}
 		after = t
 	}
 
-	// continuous aggregate view name pattern: e.g. candles_1m, candles_5m, etc.
-	// допишите реальные имена ваших view
 	view := fmt.Sprintf("candles_%s", interval.String())
-
-	q := fmt.Sprintf(`
+	query := fmt.Sprintf(`
 SELECT open_time, close_time, symbol, open, high, low, close, volume
 FROM %s
 WHERE symbol = $1
@@ -99,13 +100,15 @@ ORDER BY open_time
 LIMIT $5
 `, view)
 
-	rows, err := r.pool.Query(ctx, q, symbol, start, end, after, pageSize)
+	startTime := time.Now()
+	rows, err := r.pool.Query(ctx, query, symbol, start, end, after, pageSize)
 	if err != nil {
+		metrics.GetCandlesErrors.Inc()
 		return nil, "", fmt.Errorf("query candles: %w", err)
 	}
 	defer rows.Close()
 
-	candles := make([]*analyticspb.Candle, 0, pageSize)
+	var candles []*analyticspb.Candle
 	var lastTime time.Time
 	for rows.Next() {
 		var c analyticspb.Candle
@@ -119,18 +122,21 @@ LIMIT $5
 			&c.Close,
 			&c.Volume,
 		); err != nil {
+			metrics.GetCandlesErrors.Inc()
 			return nil, "", fmt.Errorf("scan candle: %w", err)
 		}
 		candles = append(candles, &c)
 		lastTime = c.OpenTime.AsTime()
 	}
 	if rows.Err() != nil {
+		metrics.GetCandlesErrors.Inc()
 		return nil, "", fmt.Errorf("iterate candles: %w", rows.Err())
 	}
 
+	metrics.GetCandlesLatency.Observe(time.Since(startTime).Seconds())
+
 	nextToken := ""
 	if len(candles) == pageSize {
-		// next token is the last open_time, in RFC3339Nano
 		nextToken = lastTime.Format(time.RFC3339Nano)
 	}
 	return candles, nextToken, nil
@@ -142,14 +148,14 @@ func (r *postgresRepo) StreamCandles(
 	start, end time.Time,
 	interval commonpb.AggregationInterval,
 ) (<-chan *analyticspb.CandleEvent, error) {
+	metrics.StreamCandlesRequests.Inc()
 	out := make(chan *analyticspb.CandleEvent)
 
 	go func() {
 		defer close(out)
 
-		// Re-use same query but no LIMIT, we stream all rows
 		view := fmt.Sprintf("candles_%s", interval.String())
-		q := fmt.Sprintf(`
+		query := fmt.Sprintf(`
 SELECT open_time, close_time, symbol, open, high, low, close, volume
 FROM %s
 WHERE symbol = $1
@@ -158,8 +164,9 @@ WHERE symbol = $1
 ORDER BY open_time
 `, view)
 
-		rows, err := r.pool.Query(ctx, q, symbol, start, end)
+		rows, err := r.pool.Query(ctx, query, symbol, start, end)
 		if err != nil {
+			metrics.StreamCandlesErrors.Inc()
 			out <- &analyticspb.CandleEvent{
 				Payload: &analyticspb.CandleEvent_StreamError{
 					StreamError: &commonpb.StreamError{
@@ -184,6 +191,7 @@ ORDER BY open_time
 				&c.Close,
 				&c.Volume,
 			); err != nil {
+				metrics.StreamCandlesErrors.Inc()
 				out <- &analyticspb.CandleEvent{
 					Payload: &analyticspb.CandleEvent_StreamError{
 						StreamError: &commonpb.StreamError{
@@ -194,9 +202,11 @@ ORDER BY open_time
 				}
 				return
 			}
+			metrics.StreamCandlesEvents.Inc()
 			out <- &analyticspb.CandleEvent{Payload: &analyticspb.CandleEvent_Candle{Candle: &c}}
 		}
 		if err := rows.Err(); err != nil {
+			metrics.StreamCandlesErrors.Inc()
 			out <- &analyticspb.CandleEvent{
 				Payload: &analyticspb.CandleEvent_StreamError{
 					StreamError: &commonpb.StreamError{
@@ -209,4 +219,9 @@ ORDER BY open_time
 	}()
 
 	return out, nil
+}
+
+// Ping проверяет доступность БД.
+func (s *postgresRepo) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
 }
