@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/YaganovValera/analytics-system/common"
 	"github.com/YaganovValera/analytics-system/common/backoff"
 	commonkafka "github.com/YaganovValera/analytics-system/common/kafka"
 	"github.com/YaganovValera/analytics-system/common/logger"
@@ -24,6 +25,10 @@ import (
 // -----------------------------------------------------------------------------
 // Service label (заполняется через common.InitServiceName)
 // -----------------------------------------------------------------------------
+
+func init() {
+	common.RegisterServiceLabelSetter(SetServiceLabel)
+}
 
 var serviceLabel = "unknown"
 

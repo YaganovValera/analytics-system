@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------
 
 PROTO_SRC_DIR := proto/v1
-PROTO_OUT_DIR := proto/gen/go/v1
+PROTO_OUT_DIR := proto/gen/go/
 PROTO_FILES   := $(shell find $(PROTO_SRC_DIR) -name '*.proto')
 
 .PHONY: proto-gen
@@ -13,6 +13,7 @@ proto-gen:
 	@for file in $(PROTO_FILES); do \
 		protoc \
 			-Iproto \
+			-Ithird_party/googleapis \
 			--go_out=paths=source_relative:$(PROTO_OUT_DIR) \
 			--go-grpc_out=paths=source_relative:$(PROTO_OUT_DIR) \
 			$$file; \

@@ -4,7 +4,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.21.12
-// source: common/common.proto
+// source: v1/common/common.proto
 
 package commonpb
 
@@ -27,8 +27,6 @@ const (
 // CommonServiceClient is the client API for CommonService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// CommonService provides discovery and utility methods.
 type CommonServiceClient interface {
 	ListSymbols(ctx context.Context, in *ListSymbolsRequest, opts ...grpc.CallOption) (*ListSymbolsResponse, error)
 }
@@ -54,8 +52,6 @@ func (c *commonServiceClient) ListSymbols(ctx context.Context, in *ListSymbolsRe
 // CommonServiceServer is the server API for CommonService service.
 // All implementations must embed UnimplementedCommonServiceServer
 // for forward compatibility.
-//
-// CommonService provides discovery and utility methods.
 type CommonServiceServer interface {
 	ListSymbols(context.Context, *ListSymbolsRequest) (*ListSymbolsResponse, error)
 	mustEmbedUnimplementedCommonServiceServer()
@@ -123,5 +119,5 @@ var CommonService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "common/common.proto",
+	Metadata: "v1/common/common.proto",
 }

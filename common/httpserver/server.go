@@ -1,9 +1,9 @@
-// common/httpserver/server.go
 package httpserver
 
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -104,6 +104,9 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger, extra map[string]ht
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
+		BaseContext: func(_ net.Listener) context.Context {
+			return context.Background() // переопределяется в Run
+		},
 	}
 
 	return &server{
@@ -116,6 +119,11 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger, extra map[string]ht
 // Run starts the server and shuts down gracefully on context cancellation.
 func (s *server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
+
+	s.httpServer.BaseContext = func(_ net.Listener) context.Context {
+		return ctx
+	}
+
 	go func() {
 		s.log.Info("http: starting server", zap.String("addr", s.httpServer.Addr))
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -131,6 +139,9 @@ func (s *server) Run(ctx context.Context) error {
 		serveErr = ctx.Err()
 	case err := <-errCh:
 		serveErr = err
+		if err != nil {
+			s.log.Error("http: server error", zap.Error(err))
+		}
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
@@ -142,5 +153,6 @@ func (s *server) Run(ctx context.Context) error {
 	}
 	s.log.Info("http: server stopped gracefully")
 	s.log.Sync()
+
 	return serveErr
 }

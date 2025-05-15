@@ -1,3 +1,4 @@
+# // github.com/YaganovValera/analytics-system/services/market-data-collector/Dockerfile
 # syntax=docker/dockerfile:1
 
 # ====== BUILD STAGE ======

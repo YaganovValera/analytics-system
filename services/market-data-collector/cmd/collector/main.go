@@ -1,8 +1,9 @@
-// cmd/collector/main.go
+// github.com/YaganovValera/analytics-system/services/market-data-collector/cmd/collector/main.go
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -56,8 +57,10 @@ func main() {
 
 	// 4. Run the application (metrics, telemetry, HTTP, WS, Kafka, processor)
 	if err := app.Run(ctx, cfg, log); err != nil {
-		log.Error("application exited with error", zap.Error(err))
-		os.Exit(1)
+		if !errors.Is(err, context.Canceled) {
+			log.Error("application exited with error", zap.Error(err))
+			os.Exit(1)
+		}
 	}
 
 	log.Info("shutdown complete")

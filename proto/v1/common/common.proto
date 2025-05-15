@@ -1,29 +1,19 @@
+// proto/v1/common/common.proto
 syntax = "proto3";
 
 package market.common.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/common;commonpb";
 
-import "google/protobuf/timestamp.proto";
-import "google/rpc/status.proto";
-
 // Pagination parameters for paginated API responses.
 message Pagination {
-  // Number of results to return per page.
   int32 page_size = 1;
-
-  // Token to retrieve the next page of results.
   string page_token = 2;
 }
 
 // Metadata provided with every request for observability and tracing.
 message RequestMetadata {
-  // IP address of the client.
   string ip_address = 1;
-
-  // User agent string.
   string user_agent = 2;
-
-  // Trace ID for distributed tracing systems (e.g. OpenTelemetry).
   string trace_id = 3;
 }
 

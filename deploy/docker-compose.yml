@@ -1,3 +1,4 @@
+# github.com/YaganovValera/analytics-system/deploy/docker-compose.yml
 networks:
   backend:
 
@@ -5,6 +6,7 @@ services:
   # ------------------------------------------------------------------------
   #  Core infra
   # ------------------------------------------------------------------------
+
   zookeeper:
     image: bitnami/zookeeper:3.8
     environment:
@@ -14,11 +16,17 @@ services:
       - "2181:2181"
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "echo", "ruok"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   kafka:
     image: bitnami/kafka:3.5
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -30,6 +38,11 @@ services:
       - "9092:9092"
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/9092"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   timescaledb:
     image: timescale/timescaledb:latest-pg14
@@ -41,6 +54,11 @@ services:
       - "5432:5432"
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "user"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -54,7 +72,7 @@ services:
       - "13133:13133" # Health-check
     networks:
       - backend
-
+   
   prometheus:
     image: prom/prometheus:latest
     volumes:
@@ -85,16 +103,19 @@ services:
   # ------------------------------------------------------------------------
   #  Application services
   # ------------------------------------------------------------------------
+
   market-data-collector:
     build:
       context: ../
       dockerfile: services/market-data-collector/Dockerfile
     depends_on:
-      - kafka
-      - otel-collector
+      kafka:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
+      COLLECTOR_SERVICE_NAME: market-data-collector
+      COLLECTOR_SERVICE_VERSION: "v1.0.0"
       COLLECTOR_KAFKA_BROKERS: kafka:9092
       COLLECTOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
       COLLECTOR_TELEMETRY_INSECURE: "true"
@@ -107,49 +128,50 @@ services:
     networks:
       - backend
 
-  preprocessor:
-    build:
-      context: ../
-      dockerfile: services/preprocessor/Dockerfile
-    depends_on:
-      - kafka
-      - timescaledb
-      - otel-collector
-    ports:
-      - "8090:8090"
-    environment:
-      PREPROCESSOR_KAFKA_BROKERS: kafka:9092
-      PREPROCESSOR_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
-      PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-      PREPROCESSOR_TELEMETRY_INSECURE: "true"
-      OTEL_SERVICE_NAME: preprocessor
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-      OTEL_TRACES_SAMPLER: parentbased_traceidratio
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
-    restart: always
-    networks:
-      - backend
 
-  analytics-api:
-    build:
-      context: ../
-      dockerfile: services/analytics-api/Dockerfile
-    depends_on:
-      - kafka
-      - timescaledb
-      - otel-collector
-    ports:
-      - "9090:9090"
-    environment:
-      ANALYTICS_API_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
-      ANALYTICS_API_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-      ANALYTICS_API_TELEMETRY_INSECURE: "true"
-      OTEL_SERVICE_NAME: analytics-api
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-      OTEL_TRACES_SAMPLER: parentbased_traceidratio
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
-    restart: always
-    networks:
-      - backend
+  # preprocessor:
+  #   build:
+  #     context: ../
+  #     dockerfile: services/preprocessor/Dockerfile
+  #   depends_on:
+  #     - kafka
+  #     - timescaledb
+  #     - otel-collector
+  #   ports:
+  #     - "8090:8090"
+  #   environment:
+  #     PREPROCESSOR_KAFKA_BROKERS: kafka:9092
+  #     PREPROCESSOR_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+  #     PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
+  #     PREPROCESSOR_TELEMETRY_INSECURE: "true"
+  #     OTEL_SERVICE_NAME: preprocessor
+  #     OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+  #     OTEL_EXPORTER_OTLP_INSECURE: "true"
+  #     OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  #     OTEL_TRACES_SAMPLER_ARG: "1.0"
+  #   restart: always
+  #   networks:
+  #     - backend
+
+  # analytics-api:
+  #   build:
+  #     context: ../
+  #     dockerfile: services/analytics-api/Dockerfile
+  #   depends_on:
+  #     - kafka
+  #     - timescaledb
+  #     - otel-collector
+  #   ports:
+  #     - "9090:9090"
+  #   environment:
+  #     ANALYTICS_API_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+  #     ANALYTICS_API_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
+  #     ANALYTICS_API_TELEMETRY_INSECURE: "true"
+  #     OTEL_SERVICE_NAME: analytics-api
+  #     OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+  #     OTEL_EXPORTER_OTLP_INSECURE: "true"
+  #     OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  #     OTEL_TRACES_SAMPLER_ARG: "1.0"
+  #   restart: always
+  #   networks:
+  #     - backend

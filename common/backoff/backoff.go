@@ -11,8 +11,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 
+	"github.com/YaganovValera/analytics-system/common"
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
+
+func init() {
+	common.RegisterServiceLabelSetter(SetServiceLabel)
+}
 
 var (
 	serviceLabel = "unknown"

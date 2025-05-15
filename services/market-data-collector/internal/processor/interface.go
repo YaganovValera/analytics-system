@@ -1,3 +1,4 @@
+// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/processor/interface.go
 package processor
 
 import (
@@ -6,7 +7,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 )
 
-// Processor определяет контракт на обработку сырых WS-сообщений.
+// Processor defines the interface for message handlers.
 type Processor interface {
 	Process(ctx context.Context, raw binance.RawMessage) error
 }

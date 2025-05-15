@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/YaganovValera/analytics-system/common/logger"
-	analyticspb "github.com/YaganovValera/analytics-system/proto/v1/analytics"
-	commonpb "github.com/YaganovValera/analytics-system/proto/v1/common"
+	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
+	commonpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/common"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/config"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics"
 )

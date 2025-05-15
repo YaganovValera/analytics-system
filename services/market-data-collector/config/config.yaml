@@ -1,3 +1,4 @@
+# // github.com/YaganovValera/analytics-system/services/market-data-collector/config/config.yaml
 # ------------------------------------------------------------------------------
 #  Market-Data-Collector — основной конфигурационный файл
 # ------------------------------------------------------------------------------
@@ -14,7 +15,7 @@ binance:
   # Список подписок; поддерживаются trade / depth / kline и т.д.
   symbols:
     - "btcusdt@trade"
-    # - "ethusdt@depth"
+    - "ethusdt@depth"
 
 
   # Таймауты и стратегия back-off

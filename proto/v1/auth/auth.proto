@@ -1,3 +1,4 @@
+// proto/v1/auth/auth.proto
 syntax = "proto3";
 
 package market.auth.v1;

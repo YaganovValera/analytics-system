@@ -1,4 +1,3 @@
-// common/telemetry/otel.go
 package telemetry
 
 import (
@@ -28,6 +27,8 @@ type Config struct {
 	Timeout         time.Duration // таймаут Init/Shutdown
 	SamplerRatio    float64       // 0.0…1.0 — доля выборки span'ов
 }
+
+var tracerProvider *sdktrace.TracerProvider
 
 func applyDefaults(cfg *Config) {
 	if cfg.Timeout <= 0 {
@@ -79,6 +80,7 @@ func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(conte
 	}
 
 	tp := newTracerProvider(exp, res, cfg)
+	tracerProvider = tp
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -102,8 +104,12 @@ func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(conte
 	}, nil
 }
 
-func Tracer() trace.Tracer {
-	return otel.Tracer("default")
+// TracerFor возвращает именованный OpenTelemetry tracer.
+func TracerFor(name string) trace.Tracer {
+	if tracerProvider == nil {
+		return otel.Tracer(name) // fallback
+	}
+	return tracerProvider.Tracer(name)
 }
 
 func newExporter(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
