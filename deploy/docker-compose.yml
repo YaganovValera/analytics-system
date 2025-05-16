@@ -6,6 +6,18 @@ services:
   # ------------------------------------------------------------------------
   #  Core infra
   # ------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 
   zookeeper:
     image: bitnami/zookeeper:3.8
@@ -128,30 +140,36 @@ services:
     networks:
       - backend
 
+  preprocessor:
+    build:
+      context: ../
+      dockerfile: services/preprocessor/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      PREPROCESSOR_SERVICE_NAME: preprocessor
+      PREPROCESSOR_SERVICE_VERSION: "v1.0.0"
+      PREPROCESSOR_KAFKA_BROKERS: kafka:9092
+      PREPROCESSOR_TIMESCALEDB_DSN: postgres://user:pass@tsdb:5432/dbname?sslmode=disable
+      PREPROCESSOR_TIMESCALEDB_MIGRATIONS_DIR: migrations/timescaledb
+      PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
+      PREPROCESSOR_TELEMETRY_INSECURE: "true"
 
-  # preprocessor:
-  #   build:
-  #     context: ../
-  #     dockerfile: services/preprocessor/Dockerfile
-  #   depends_on:
-  #     - kafka
-  #     - timescaledb
-  #     - otel-collector
-  #   ports:
-  #     - "8090:8090"
-  #   environment:
-  #     PREPROCESSOR_KAFKA_BROKERS: kafka:9092
-  #     PREPROCESSOR_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
-  #     PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-  #     PREPROCESSOR_TELEMETRY_INSECURE: "true"
-  #     OTEL_SERVICE_NAME: preprocessor
-  #     OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-  #     OTEL_EXPORTER_OTLP_INSECURE: "true"
-  #     OTEL_TRACES_SAMPLER: parentbased_traceidratio
-  #     OTEL_TRACES_SAMPLER_ARG: "1.0"
-  #   restart: always
-  #   networks:
-  #     - backend
+      OTEL_SERVICE_NAME: preprocessor
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+    restart: always
+    networks:
+      - backend
 
   # analytics-api:
   #   build:

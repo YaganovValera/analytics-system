@@ -3,33 +3,34 @@ module github.com/YaganovValera/analytics-system/services/preprocessor
 go 1.23.0
 
 require (
-	github.com/IBM/sarama v1.45.1
-	github.com/YaganovValera/analytics-system/common v0.0.0-20250511100931-488e777c7608
-	github.com/YaganovValera/analytics-system/proto v0.0.0-20250511100931-488e777c7608
+	github.com/YaganovValera/analytics-system/common v0.0.0-20250516141256-696725ecf525
+	github.com/YaganovValera/analytics-system/proto v0.0.0-20250516141256-696725ecf525
+	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/jackc/pgx/v5 v5.7.4
-	github.com/mitchellh/mapstructure v1.5.0
-	github.com/pressly/goose/v3 v3.24.3
 	github.com/prometheus/client_golang v1.22.0
-	github.com/spf13/viper v1.20.1
 	go.opentelemetry.io/otel v1.35.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.14.0
 )
 
 require (
+	github.com/IBM/sarama v1.45.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/dnwe/otelsarama v0.0.0-20240308230250-9388d9d40bc0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/lib/pq v1.10.9 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/sethvargo/go-retry v0.3.0 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/spf13/viper v1.20.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.35.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.35.0 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
 	google.golang.org/grpc v1.71.1 // indirect
 )
 
@@ -49,7 +50,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1 // indirect
-	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect

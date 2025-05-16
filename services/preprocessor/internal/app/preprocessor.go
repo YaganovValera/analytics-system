@@ -49,6 +49,10 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("redis: %w", err)
 	}
 
+	if err := timescaledb.ApplyMigrations(cfg.Timescale.DSN, cfg.Timescale.MigrationsDir, log); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
+	}
+
 	timescale, err := timescaledb.NewTimescaleWriter(cfg.Timescale, log)
 	if err != nil {
 		return fmt.Errorf("timescaledb: %w", err)

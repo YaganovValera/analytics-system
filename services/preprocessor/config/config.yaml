@@ -36,6 +36,7 @@ redis:
 # ------------------------------------------------------------------------------
 timescaledb:
   dsn: "postgres://user:pass@tsdb:5432/dbname?sslmode=disable"
+  migrations_dir: "migrations/timescaledb"
 
 # ------------------------------------------------------------------------------
 # OpenTelemetry

@@ -10,6 +10,10 @@ import (
 
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -21,7 +25,8 @@ var tracer = otel.Tracer("preprocessor/storage/timescaledb")
 
 // Config описывает конфигурацию подключения к TimescaleDB.
 type Config struct {
-	DSN string `mapstructure:"dsn"`
+	DSN           string `mapstructure:"dsn"`
+	MigrationsDir string `mapstructure:"migrations_dir"`
 }
 
 // TimescaleWriter реализует FlushSink, вставляя свечи в TimescaleDB.
@@ -87,4 +92,21 @@ func (w *TimescaleWriter) FlushCandle(ctx context.Context, c *aggregator.Candle)
 // Close завершает соединение с БД.
 func (w *TimescaleWriter) Close() {
 	w.db.Close()
+}
+
+func ApplyMigrations(dsn string, migrationsDir string, log *logger.Logger) error {
+	m, err := migrate.New(
+		fmt.Sprintf("file://%s", migrationsDir),
+		dsn,
+	)
+	if err != nil {
+		return fmt.Errorf("migrate init: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migrate up: %w", err)
+	}
+	log.Info("migrations applied successfully")
+	return nil
 }
