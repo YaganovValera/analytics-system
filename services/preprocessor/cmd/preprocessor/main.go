@@ -1,8 +1,9 @@
-// services/preprocessor/cmd/preprocessor/main.go
+// github.com/YaganovValera/analytics-system/services/preprocessor/cmd/preprocessor/main.go
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -40,6 +41,10 @@ func main() {
 	}
 	defer log.Sync()
 
+	if cfg.Logging.DevMode {
+		cfg.Print()
+	}
+
 	log.Info("starting preprocessor service",
 		zap.String("service.name", cfg.ServiceName),
 		zap.String("service.version", cfg.ServiceVersion),
@@ -52,8 +57,12 @@ func main() {
 
 	// 4. Run application
 	if err := app.Run(ctx, cfg, log); err != nil {
-		log.Error("application exited with error", zap.Error(err))
-		os.Exit(1)
+		if errors.Is(err, context.Canceled) {
+			log.Info("application shutdown complete")
+		} else {
+			log.Error("application exited with error", zap.Error(err))
+			os.Exit(1)
+		}
 	}
 
 	log.Info("shutdown complete")

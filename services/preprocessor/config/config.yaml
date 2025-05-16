@@ -1,53 +1,76 @@
-# services/preprocessor/config/config.yaml
+# // github.com/YaganovValera/analytics-system/services/preprocessor/config/config.yaml
+
+
+# ------------------------------------------------------------------------------
+#  Preprocessor — основной конфигурационный файл
+# ------------------------------------------------------------------------------
+
 service_name:    "preprocessor"
 service_version: "v1.0.0"
 
-binance:
-  raw_topic: "marketdata.raw"
-  symbols:
-    - "btcusdt@trade"
-    - "ethusdt@trade"
-  backoff:
-    initial_interval:   "1s"
-    randomization_factor: 0.5
-    multiplier:          2.0
-    max_interval:        "30s"
-    max_elapsed_time:    "5m"
-
+# ------------------------------------------------------------------------------
+# Kafka Consumer
+# ------------------------------------------------------------------------------
 kafka:
   brokers:
     - "kafka:9092"
-  raw_topic:   "marketdata.raw"
-  timeout:     "15s"
-  acks:        "all"
-  compression: "none"
+  version: "2.8.0"
+  group_id: "preprocessor"
+  raw_topic: "marketdata.raw"
+  output_topic_prefix: "candles"
   backoff:
-    initial_interval:   "1s"
-    randomization_factor: 0.5
-    multiplier:          2.0
-    max_interval:        "30s"
-    max_elapsed_time:    "5m"
+    initial_interval: "1s"
+    max_interval: "30s"
+    max_elapsed_time: "5m"
 
-postgres:
-  dsn:              "postgres://user:pass@postgres:5432/analytics?sslmode=disable"
-  max_open_conns:   25
-  max_idle_conns:   10
-  conn_max_lifetime: "1h"
+# ------------------------------------------------------------------------------
+# Redis (PartialBarStorage)
+# ------------------------------------------------------------------------------
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
 
+# ------------------------------------------------------------------------------
+# TimescaleDB (FlushSink)
+# ------------------------------------------------------------------------------
+timescaledb:
+  dsn: "postgres://user:pass@tsdb:5432/dbname?sslmode=disable"
+
+# ------------------------------------------------------------------------------
+# OpenTelemetry
+# ------------------------------------------------------------------------------
 telemetry:
   otel_endpoint: "otel-collector:4317"
-  insecure:      false
+  insecure: true
 
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
 logging:
-  level:    "info"
+  level: "info"
   dev_mode: false
 
+# ------------------------------------------------------------------------------
+# HTTP Server (metrics + health)
+# ------------------------------------------------------------------------------
 http:
-  port:              8090
-  read_timeout:      "10s"
-  write_timeout:     "15s"
-  idle_timeout:      "60s"
-  shutdown_timeout:  "5s"
-  metrics_path:      "/metrics"
-  healthz_path:      "/healthz"
-  readyz_path:       "/readyz"
+  port: 8081
+  read_timeout: "10s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "5s"
+  metrics_path: "/metrics"
+  healthz_path: "/healthz"
+  readyz_path: "/readyz"
+
+# ------------------------------------------------------------------------------
+# Intervals (OHLCV)
+# ------------------------------------------------------------------------------
+intervals:
+  - "1m"
+  - "5m"
+  - "15m"
+  - "1h"
+  - "4h"
+  - "1d"

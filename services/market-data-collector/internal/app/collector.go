@@ -36,9 +36,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("init tracer: %w", err)
 	}
-	defer shutdownSafe(ctx, "telemetry", func() error {
-		return shutdownTracer(ctx)
-	}, log)
+	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
 	wsConn, err := binance.NewConnector(binance.Config{
 		URL:              cfg.Binance.WSURL,
@@ -51,7 +49,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("binance: %w", err)
 	}
-	defer shutdownSafe(ctx, "ws-connector", wsConn.Close, log)
+	defer shutdownSafe(ctx, "ws-connector", func(ctx context.Context) error {
+		return wsConn.Close()
+	}, log)
 
 	prod, err := producer.New(ctx, producer.Config{
 		Brokers:        cfg.Kafka.Brokers,
@@ -65,7 +65,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("kafka: %w", err)
 	}
-	defer shutdownSafe(ctx, "kafka-producer", prod.Close, log)
+	defer shutdownSafe(ctx, "kafka-producer", func(ctx context.Context) error {
+		return prod.Close()
+	}, log)
 
 	// два отдельных процессора
 	tradeProc := processor.NewTradeProcessor(prod, cfg.Kafka.RawTopic, log)
@@ -81,7 +83,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		MetricsPath:     cfg.HTTP.MetricsPath,
 		HealthzPath:     cfg.HTTP.HealthzPath,
 		ReadyzPath:      cfg.HTTP.ReadyzPath,
-	}, readiness, log, nil) // <- fixed
+	}, readiness, log, nil)
 	if err != nil {
 		return fmt.Errorf("httpserver: %w", err)
 	}
@@ -140,18 +142,20 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	if err := g.Wait(); err != nil {
 		if errors.Is(err, context.Canceled) {
-			log.WithContext(ctx).Info("collector exited normally (context canceled)")
+			log.WithContext(ctx).Info("collector exited on context cancel")
 			return nil
 		}
 		log.WithContext(ctx).Error("collector exited with error", zap.Error(err))
 		return err
 	}
+	log.WithContext(ctx).Info("collector exited cleanly")
+	return nil
 
 }
 
-func shutdownSafe(ctx context.Context, name string, fn func() error, log *logger.Logger) {
+func shutdownSafe(ctx context.Context, name string, fn func(context.Context) error, log *logger.Logger) {
 	log.WithContext(ctx).Info(name + ": shutting down")
-	if err := fn(); err != nil {
+	if err := fn(ctx); err != nil {
 		log.WithContext(ctx).Error(name+" shutdown failed", zap.Error(err))
 	} else {
 		log.WithContext(ctx).Info(name + ": shutdown complete")

@@ -1,4 +1,5 @@
-// services/preprocessor/internal/metrics/metrics.go
+// github.com/YaganovValera/analytics-system/services/preprocessor/internal/metrics/metrics.go
+
 package metrics
 
 import (
@@ -8,47 +9,50 @@ import (
 )
 
 var (
-	once              sync.Once
-	ProcessedMessages prometheus.Counter
-	ProcessErrors     prometheus.Counter
-	InsertErrors      prometheus.Counter
-	InsertLatency     prometheus.Histogram
+	once               sync.Once
+	ProcessedTotal     *prometheus.CounterVec
+	FlushedTotal       *prometheus.CounterVec
+	FlushLatency       *prometheus.HistogramVec
+	RestoreErrorsTotal *prometheus.CounterVec
 )
 
-// Register initializes and registers all metrics exactly once.
-// If r == nil, uses prometheus.DefaultRegisterer; duplicate registrations are ignored.
+// Register инициализирует и регистрирует все метрики агрегатора.
 func Register(r prometheus.Registerer) {
 	once.Do(func() {
 		if r == nil {
 			r = prometheus.DefaultRegisterer
 		}
 
-		ProcessedMessages = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "processed_messages_total",
-			Help: "Total number of MarketData messages processed",
-		})
-		ProcessErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "process_errors_total",
-			Help: "Total number of errors during message processing",
-		})
-		InsertErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "insert_errors_total",
-			Help: "Total number of errors inserting raw data into TimescaleDB",
-		})
-		InsertLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-			Namespace: "preprocessor", Subsystem: "processor", Name: "insert_latency_seconds",
-			Help:    "Latency of inserting MarketData into TimescaleDB",
+		ProcessedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "aggregator", Name: "processed_total",
+			Help: "Total MarketData ticks processed",
+		}, []string{"interval"})
+
+		FlushedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "aggregator", Name: "flushed_total",
+			Help: "Total finalized candles flushed",
+		}, []string{"interval"})
+
+		FlushLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "preprocessor", Subsystem: "aggregator", Name: "flush_latency_seconds",
+			Help:    "Time between last tick and flush",
 			Buckets: prometheus.DefBuckets,
-		})
+		}, []string{"interval"})
+
+		RestoreErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "preprocessor", Subsystem: "aggregator", Name: "restore_errors_total",
+			Help: "Number of failed partial bar restore attempts",
+		}, []string{"interval"})
 
 		collectors := []prometheus.Collector{
-			ProcessedMessages,
-			ProcessErrors,
-			InsertErrors,
-			InsertLatency,
+			ProcessedTotal,
+			FlushedTotal,
+			FlushLatency,
+			RestoreErrorsTotal,
 		}
 		for _, c := range collectors {
 			if err := r.Register(c); err != nil {
+				// игнорируем попытку повторной регистрации
 				if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 					panic(err)
 				}

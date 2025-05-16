@@ -1,112 +1,132 @@
-// services/preprocessor/internal/app/preprocessor.go
+// github.com/YaganovValera/analytics-system/services/preprocessor/internal/app/preprocessor.go
+
+// internal/app/preprocessor.go
 package app
 
 import (
 	"context"
 	"fmt"
-
-	"github.com/IBM/sarama"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
+	"time"
 
 	"github.com/YaganovValera/analytics-system/common"
 	httpserver "github.com/YaganovValera/analytics-system/common/httpserver"
-	commonkafka "github.com/YaganovValera/analytics-system/common/kafka"
-	consumer "github.com/YaganovValera/analytics-system/common/kafka/consumer"
+	"github.com/YaganovValera/analytics-system/common/kafka/consumer"
+	"github.com/YaganovValera/analytics-system/common/kafka/producer"
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/config"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/kafka"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/metrics"
-	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/processor"
-	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage"
+	kafkasink "github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/kafkasink"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/redis"
+	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/timescaledb"
+
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
-// Run wires up and runs the preprocessor service.
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	// 0) Сквозной service-label
 	common.InitServiceName(cfg.ServiceName)
-
-	// 1) Prometheus-метрики
 	metrics.Register(nil)
 
-	// 2) OpenTelemetry
 	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
-		Endpoint:       cfg.Telemetry.OTLPEndpoint,
-		ServiceName:    cfg.ServiceName,
-		ServiceVersion: cfg.ServiceVersion,
-		Insecure:       cfg.Telemetry.Insecure,
+		Endpoint:        cfg.Telemetry.OTLPEndpoint,
+		ServiceName:     cfg.ServiceName,
+		ServiceVersion:  cfg.ServiceVersion,
+		Insecure:        cfg.Telemetry.Insecure,
+		SamplerRatio:    1.0,
+		ReconnectPeriod: 5 * time.Second,
+		Timeout:         5 * time.Second,
 	}, log)
 	if err != nil {
-		return fmt.Errorf("telemetry init: %w", err)
+		return fmt.Errorf("init tracer: %w", err)
 	}
-	defer shutdownTracer(context.Background())
+	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
-	// 3) Postgres (TimescaleDB)
-	pgStorage, err := storage.NewPostgres(ctx, cfg.Postgres, log)
+	rstore, err := redis.NewRedisStorage(cfg.Redis, log)
 	if err != nil {
-		return fmt.Errorf("postgres init: %w", err)
+		return fmt.Errorf("redis: %w", err)
 	}
-	defer pgStorage.Close()
 
-	// 4) Kafka consumer
-	kafkaConsumer, err := consumer.New(ctx, consumer.Config{
+	timescale, err := timescaledb.NewTimescaleWriter(cfg.Timescale, log)
+	if err != nil {
+		return fmt.Errorf("timescaledb: %w", err)
+	}
+	defer timescale.Close()
+
+	kprod, err := producer.New(ctx, producer.Config{
 		Brokers: cfg.Kafka.Brokers,
-		GroupID: cfg.ServiceName,
-		Version: sarama.MaxVersion.String(),
 		Backoff: cfg.Kafka.Backoff,
 	}, log)
 	if err != nil {
-		return fmt.Errorf("kafka consumer init: %w", err)
+		return fmt.Errorf("kafka-producer: %w", err)
 	}
+	defer shutdownSafe(ctx, "kafka-producer", func(ctx context.Context) error {
+		return kprod.Close()
+	}, log)
 
-	// 5) Processor
-	proc := processor.NewProcessor(pgStorage, log)
+	kafkaSink := kafkasink.New(kprod, cfg.Kafka.OutputTopicPrefix, log)
+	flushSink := aggregator.NewMultiSink(timescale, kafkaSink)
 
-	// 6) HTTP/metrics server
-	readiness := func() error { return pgStorage.Ping(ctx) }
-	httpSrv, err := httpserver.New(
-		httpserver.Config{
-			Addr:            fmt.Sprintf(":%d", cfg.HTTP.Port),
-			ReadTimeout:     cfg.HTTP.ReadTimeout,
-			WriteTimeout:    cfg.HTTP.WriteTimeout,
-			IdleTimeout:     cfg.HTTP.IdleTimeout,
-			ShutdownTimeout: cfg.HTTP.ShutdownTimeout,
-			MetricsPath:     cfg.HTTP.MetricsPath,
-			HealthzPath:     cfg.HTTP.HealthzPath,
-			ReadyzPath:      cfg.HTTP.ReadyzPath,
-		},
-		readiness,
-		log,
-	)
+	agg, err := aggregator.NewManager(cfg.Intervals, flushSink, rstore, log)
 	if err != nil {
-		return fmt.Errorf("http server init: %w", err)
+		return fmt.Errorf("aggregator: %w", err)
+	}
+	defer agg.Close()
+
+	kc, err := consumer.New(ctx, consumer.Config{
+		Brokers: cfg.Kafka.Brokers,
+		GroupID: cfg.Kafka.GroupID,
+		Version: cfg.Kafka.Version,
+		Backoff: cfg.Kafka.Backoff,
+	}, log)
+	if err != nil {
+		return fmt.Errorf("kafka-consumer: %w", err)
+	}
+	defer kc.Close()
+
+	consumer := kafka.New(kc, []string{cfg.Kafka.RawTopic}, agg.Process, log)
+
+	readiness := func() error { return nil }
+	httpSrv, err := httpserver.New(httpserver.Config{
+		Addr:            fmt.Sprintf(":%d", cfg.HTTP.Port),
+		ReadTimeout:     cfg.HTTP.ReadTimeout,
+		WriteTimeout:    cfg.HTTP.WriteTimeout,
+		IdleTimeout:     cfg.HTTP.IdleTimeout,
+		ShutdownTimeout: cfg.HTTP.ShutdownTimeout,
+		MetricsPath:     cfg.HTTP.MetricsPath,
+		HealthzPath:     cfg.HTTP.HealthzPath,
+		ReadyzPath:      cfg.HTTP.ReadyzPath,
+	}, readiness, log, nil)
+	if err != nil {
+		return fmt.Errorf("httpserver: %w", err)
 	}
 
-	log.Info("preprocessor: components initialized, entering run-loop")
-
-	// 7) Concurrent loops
+	log.WithContext(ctx).Info("preprocessor: components initialized, starting run loops")
 	g, ctx := errgroup.WithContext(ctx)
 
-	// 7.1 HTTP
-	g.Go(func() error {
-		return httpSrv.Start(ctx)
-	})
+	g.Go(func() error { return httpSrv.Run(ctx) })
+	g.Go(func() error { return consumer.Run(ctx) })
 
-	// 7.2 Kafka → Processor
-	g.Go(func() error {
-		return kafkaConsumer.Consume(ctx, []string{cfg.Kafka.RawTopic}, func(msg *commonkafka.Message) error {
-			return proc.Process(ctx, msg)
-		})
-	})
-
-	// 8) Wait & shutdown
-	if err := g.Wait(); err != nil && ctx.Err() == nil {
-		log.WithContext(ctx).Error("runtime error", zap.Error(err))
-	}
-	if err := kafkaConsumer.Close(); err != nil {
-		log.Error("kafka consumer close", zap.Error(err))
+	if err := g.Wait(); err != nil {
+		if ctx.Err() == context.Canceled {
+			log.WithContext(ctx).Info("preprocessor exited on context cancel")
+			return nil
+		}
+		log.WithContext(ctx).Error("preprocessor exited with error", zap.Error(err))
+		return err
 	}
 
-	log.Info("preprocessor shutdown complete")
-	return ctx.Err()
+	log.WithContext(ctx).Info("preprocessor exited cleanly")
+	return nil
+}
+
+func shutdownSafe(ctx context.Context, name string, fn func(context.Context) error, log *logger.Logger) {
+	log.WithContext(ctx).Info(name + ": shutting down")
+	if err := fn(ctx); err != nil {
+		log.WithContext(ctx).Error(name+" shutdown failed", zap.Error(err))
+	} else {
+		log.WithContext(ctx).Info(name + ": shutdown complete")
+	}
 }

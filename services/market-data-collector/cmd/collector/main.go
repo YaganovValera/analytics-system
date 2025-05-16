@@ -57,7 +57,9 @@ func main() {
 
 	// 4. Run the application (metrics, telemetry, HTTP, WS, Kafka, processor)
 	if err := app.Run(ctx, cfg, log); err != nil {
-		if !errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) {
+			log.Info("application shutdown complete")
+		} else {
 			log.Error("application exited with error", zap.Error(err))
 			os.Exit(1)
 		}
