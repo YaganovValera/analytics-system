@@ -41,7 +41,7 @@ WORKDIR /app
 # 6) Copy binary and config
 COPY --from=builder /app/preprocessor .
 COPY --from=builder /app/services/preprocessor/config ./config
-COPY --from=builder /app/services/preprocessor/migrations ./migrations
+COPY --from=builder /app/services/preprocessor/migrations/timescaledb ./migrations/timescaledb
 
 # 7) Drop privileges
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

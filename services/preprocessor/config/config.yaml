@@ -35,8 +35,8 @@ redis:
 # TimescaleDB (FlushSink)
 # ------------------------------------------------------------------------------
 timescaledb:
-  dsn: "postgres://user:pass@tsdb:5432/dbname?sslmode=disable"
-  migrations_dir: "migrations/timescaledb"
+  dsn: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+  migrations_dir: "/app/migrations/timescaledb"
 
 # ------------------------------------------------------------------------------
 # OpenTelemetry
