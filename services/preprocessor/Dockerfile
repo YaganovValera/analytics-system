@@ -26,6 +26,8 @@ RUN go work sync
 # 4) Copy the rest of the source
 COPY . .
 
+COPY services/preprocessor/migrations/timescaledb ./services/preprocessor/migrations/timescaledb
+
 WORKDIR /app/services/preprocessor
 
 # 5) Build the static binary
@@ -41,7 +43,7 @@ WORKDIR /app
 # 6) Copy binary and config
 COPY --from=builder /app/preprocessor .
 COPY --from=builder /app/services/preprocessor/config ./config
-COPY --from=builder /app/services/preprocessor/migrations/timescaledb ./migrations/timescaledb
+COPY --from=builder /app/services/preprocessor/migrations/timescaledb /app/migrations/timescaledb
 
 # 7) Drop privileges
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

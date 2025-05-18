@@ -1,8 +1,10 @@
-// services/analytics-api/cmd/analytics-api/main.go
+// github.com/YaganovValera/analytics-system/services/analytics-api/cmd/analytics-api/main.go
+// cmd/analytics-api/main.go
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -17,19 +19,19 @@ import (
 )
 
 func main() {
-	// 1) Путь до конфига
+	// 0. Command-line flags
 	var configPath string
 	pflag.StringVar(&configPath, "config", "config/config.yaml", "path to config file")
 	pflag.Parse()
 
-	// 2) Загрузка конфига
+	// 1. Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config load error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 3) Логгер
+	// 2. Initialize logger
 	log, err := logger.New(logger.Config{
 		Level:   cfg.Logging.Level,
 		DevMode: cfg.Logging.DevMode,
@@ -40,7 +42,6 @@ func main() {
 	}
 	defer log.Sync()
 
-	// 3a) При dev-режиме — вывести конфиг
 	if cfg.Logging.DevMode {
 		cfg.Print()
 	}
@@ -51,14 +52,18 @@ func main() {
 		zap.String("config.path", configPath),
 	)
 
-	// 4) Контекст с отменой по SIGINT/SIGTERM
+	// 3. Build context that cancels on SIGINT/SIGTERM
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// 5) Запуск приложения
+	// 4. Run application
 	if err := app.Run(ctx, cfg, log); err != nil {
-		log.Error("application exited with error", zap.Error(err))
-		os.Exit(1)
+		if errors.Is(err, context.Canceled) {
+			log.Info("application shutdown complete")
+		} else {
+			log.Error("application exited with error", zap.Error(err))
+			os.Exit(1)
+		}
 	}
 
 	log.Info("shutdown complete")

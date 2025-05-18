@@ -75,8 +75,8 @@ func Load(path string) (*Config, error) {
 			"redis.db":       0,
 			"redis.password": "",
 
-			"timescaledb.dsn": "postgres://user:pass@tsdb:5432/dbname?sslmode=disable",
-			"timescaledb.migrations_dir": "migrations/timescaledb",
+			"timescaledb.dsn":            "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable",
+			"timescaledb.migrations_dir": "/app/migrations/timescaledb",
 
 			"telemetry.otel_endpoint": "otel-collector:4317",
 			"telemetry.insecure":      true,
