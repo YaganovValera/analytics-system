@@ -14,6 +14,10 @@ COPY go.work go.work.sum ./
 COPY common/go.mod common/go.sum ./common/
 COPY proto/go.mod proto/go.sum ./proto/
 COPY services/analytics-api/go.mod services/analytics-api/go.sum ./services/analytics-api/
+COPY services/api-gateway/go.mod services/api-gateway/go.sum ./services/api-gateway/
+COPY services/auth/go.mod services/auth/go.sum ./services/auth/
+COPY services/preprocessor/go.mod services/preprocessor/go.sum ./services/preprocessor/
+COPY services/market-data-collector/go.mod services/market-data-collector/go.sum ./services/market-data-collector/
 
 # 3) Sync modules
 RUN go work sync

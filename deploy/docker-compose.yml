@@ -171,25 +171,36 @@ services:
     networks:
       - backend
 
-  # analytics-api:
-  #   build:
-  #     context: ../
-  #     dockerfile: services/analytics-api/Dockerfile
-  #   depends_on:
-  #     - kafka
-  #     - timescaledb
-  #     - otel-collector
-  #   ports:
-  #     - "9090:9090"
-  #   environment:
-  #     ANALYTICS_API_POSTGRES_DSN: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
-  #     ANALYTICS_API_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-  #     ANALYTICS_API_TELEMETRY_INSECURE: "true"
-  #     OTEL_SERVICE_NAME: analytics-api
-  #     OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-  #     OTEL_EXPORTER_OTLP_INSECURE: "true"
-  #     OTEL_TRACES_SAMPLER: parentbased_traceidratio
-  #     OTEL_TRACES_SAMPLER_ARG: "1.0"
-  #   restart: always
-  #   networks:
-  #     - backend
+  analytics-api:
+    build:
+      context: ../
+      dockerfile: services/analytics-api/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      ANALYTICS_SERVICE_NAME: analytics-api
+      ANALYTICS_SERVICE_VERSION: "v1.0.0"
+
+      ANALYTICS_KAFKA_BROKERS: kafka:9092
+      ANALYTICS_KAFKA_GROUP_ID: analytics-api
+      ANALYTICS_KAFKA_VERSION: "2.8.0"
+      ANALYTICS_KAFKA_TOPIC_PREFIX: candles
+
+      ANALYTICS_TIMESCALEDB_DSN: postgres://user:pass@timescaledb:5432/analytics?sslmode=disable
+
+      ANALYTICS_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
+      ANALYTICS_TELEMETRY_INSECURE: "true"
+
+      OTEL_SERVICE_NAME: analytics-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+    restart: always
+    networks:
+      - backend
