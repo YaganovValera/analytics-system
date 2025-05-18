@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/YaganovValera/analytics-system/common"
 	httpserver "github.com/YaganovValera/analytics-system/common/httpserver"
 	producer "github.com/YaganovValera/analytics-system/common/kafka/producer"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/config"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/metrics"
@@ -22,7 +22,7 @@ import (
 )
 
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	common.InitServiceName(cfg.ServiceName)
+	serviceid.InitServiceName(cfg.ServiceName)
 	metrics.Register(nil)
 
 	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
@@ -119,6 +119,18 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 					if !ok {
 						log.WithContext(ctx).Warn("ws channel closed, restarting")
 						break inner
+					}
+
+					// Контроль заполнения буфера
+					if cap(msgCh) > 0 {
+						fillRatio := float64(len(msgCh)) / float64(cap(msgCh))
+						if fillRatio >= 0.8 {
+							log.WithContext(ctx).Warn("ws channel is filling up",
+								zap.Float64("fill_ratio", fillRatio),
+								zap.Int("current", len(msgCh)),
+								zap.Int("capacity", cap(msgCh)),
+							)
+						}
 					}
 
 					var err error

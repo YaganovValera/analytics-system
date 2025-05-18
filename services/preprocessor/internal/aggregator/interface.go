@@ -3,6 +3,7 @@ package aggregator
 
 import (
 	"context"
+	"time"
 
 	marketdatapb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/marketdata"
 )
@@ -29,4 +30,10 @@ type PartialBarStorage interface {
 	Save(ctx context.Context, candle *Candle) error
 	Load(ctx context.Context, symbol, interval string) (*Candle, error)
 	Delete(ctx context.Context, symbol, interval string) error
+
+	// Новые явные методы
+	LoadAt(ctx context.Context, symbol, interval string, ts time.Time) (*Candle, error)
+	DeleteAt(ctx context.Context, symbol, interval string, ts time.Time) error
+
+	Close() error
 }

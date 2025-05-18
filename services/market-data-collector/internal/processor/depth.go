@@ -15,6 +15,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -42,11 +43,11 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	metrics.EventsTotal.Inc()
 
 	var evt struct {
-		EventType string     `json:"e"` // тип события (должен быть "depthUpdate")
-		Ev        int64      `json:"E"` // event time
-		S         string     `json:"s"` // symbol
-		B         [][]string `json:"b"` // bids [price, quantity]
-		A         [][]string `json:"a"` // asks [price, quantity]
+		EventType string     `json:"e"` // always "depthUpdate"
+		EventTime int64      `json:"E"` // renamed: Ev → EventTime
+		Symbol    string     `json:"s"` // renamed: S → Symbol
+		Bids      [][]string `json:"b"` // renamed: B → Bids
+		Asks      [][]string `json:"a"` // renamed: A → Asks
 	}
 
 	if err := json.Unmarshal(raw.Data, &evt); err != nil {
@@ -55,6 +56,7 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 			zap.ByteString("raw", raw.Data),
 			zap.Error(err),
 		)
+		span.SetAttributes(attribute.String("raw_data", string(raw.Data)))
 		span.RecordError(err)
 		return nil
 	}
@@ -74,27 +76,35 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 		return &marketdata.OrderBookLevel{Price: price, Quantity: qty}, nil
 	}
 
-	bids := make([]*marketdata.OrderBookLevel, 0, len(evt.B))
-	for _, entry := range evt.B {
+	bids := make([]*marketdata.OrderBookLevel, 0, len(evt.Bids))
+	for _, entry := range evt.Bids {
 		if lvl, err := convert(entry); err == nil {
 			bids = append(bids, lvl)
 		} else {
-			dp.log.WithContext(ctx).Debug("skipped malformed bid", zap.Strings("entry", entry), zap.Error(err))
+			dp.log.WithContext(ctx).Debug("skipped malformed bid",
+				zap.String("symbol", evt.Symbol),
+				zap.Any("entry", entry),
+				zap.Error(err),
+			)
 		}
 	}
 
-	asks := make([]*marketdata.OrderBookLevel, 0, len(evt.A))
-	for _, entry := range evt.A {
+	asks := make([]*marketdata.OrderBookLevel, 0, len(evt.Asks))
+	for _, entry := range evt.Asks {
 		if lvl, err := convert(entry); err == nil {
 			asks = append(asks, lvl)
 		} else {
-			dp.log.WithContext(ctx).Debug("skipped malformed ask", zap.Strings("entry", entry), zap.Error(err))
+			dp.log.WithContext(ctx).Debug("skipped malformed ask",
+				zap.String("symbol", evt.Symbol),
+				zap.Any("entry", entry),
+				zap.Error(err),
+			)
 		}
 	}
 
 	msg := &marketdata.OrderBookSnapshot{
-		Timestamp: timestamppb.New(time.UnixMilli(evt.Ev)),
-		Symbol:    evt.S,
+		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
+		Symbol:    evt.Symbol,
 		Bids:      bids,
 		Asks:      asks,
 	}
@@ -102,7 +112,17 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	bytes, err := proto.Marshal(msg)
 	if err != nil {
 		metrics.SerializeErrors.Inc()
-		dp.log.WithContext(ctx).Error("marshal depth failed", zap.Error(err))
+		dp.log.WithContext(ctx).Error("marshal depth failed",
+			zap.String("symbol", evt.Symbol),
+			zap.Int("bids", len(bids)),
+			zap.Int("asks", len(asks)),
+			zap.Error(err),
+		)
+		span.SetAttributes(
+			attribute.String("symbol", evt.Symbol),
+			attribute.Int("bids", len(bids)),
+			attribute.Int("asks", len(asks)),
+		)
 		span.RecordError(err)
 		return err
 	}
@@ -111,10 +131,17 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	err = dp.producer.Publish(ctx, dp.topic, nil, bytes)
 	if err != nil {
 		metrics.PublishErrors.Inc()
-		dp.log.WithContext(ctx).Error("publish depth failed", zap.Error(err))
+		dp.log.WithContext(ctx).Error("publish depth failed",
+			zap.String("symbol", evt.Symbol),
+			zap.Int("bids", len(bids)),
+			zap.Int("asks", len(asks)),
+			zap.Error(err),
+		)
+		span.SetAttributes(attribute.String("symbol", evt.Symbol))
 		span.RecordError(err)
 		return err
 	}
+
 	metrics.PublishLatency.Observe(time.Since(start).Seconds())
 	return nil
 }

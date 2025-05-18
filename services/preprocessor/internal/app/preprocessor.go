@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/YaganovValera/analytics-system/common"
 	httpserver "github.com/YaganovValera/analytics-system/common/httpserver"
 	"github.com/YaganovValera/analytics-system/common/kafka/consumer"
 	"github.com/YaganovValera/analytics-system/common/kafka/producer"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/config"
@@ -27,7 +27,7 @@ import (
 )
 
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	common.InitServiceName(cfg.ServiceName)
+	serviceid.InitServiceName(cfg.ServiceName)
 	metrics.Register(nil)
 
 	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
@@ -48,6 +48,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("redis: %w", err)
 	}
+	defer shutdownSafe(ctx, "redis", func(ctx context.Context) error {
+		return rstore.Close()
+	}, log)
 
 	if err := timescaledb.ApplyMigrations(cfg.Timescale.DSN, cfg.Timescale.MigrationsDir, log); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)

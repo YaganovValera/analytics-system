@@ -16,10 +16,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/YaganovValera/analytics-system/common"
 	"github.com/YaganovValera/analytics-system/common/backoff"
 	commonkafka "github.com/YaganovValera/analytics-system/common/kafka"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 )
 
 // -----------------------------------------------------------------------------
@@ -27,7 +27,7 @@ import (
 // -----------------------------------------------------------------------------
 
 func init() {
-	common.RegisterServiceLabelSetter(SetServiceLabel)
+	serviceid.Register(SetServiceLabel)
 }
 
 var serviceLabel = "unknown"
@@ -243,7 +243,16 @@ func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Produ
 
 	ctxConn, span := tracer.Start(ctx, "Connect",
 		trace.WithAttributes(attribute.StringSlice("brokers", cfg.Brokers)))
-	if err := backoff.Execute(ctxConn, cfg.Backoff, log, connect); err != nil {
+
+	notify := func(ctx context.Context, err error, delay time.Duration, attempt int) {
+		log.WithContext(ctx).Warn("kafka producer retry",
+			zap.Int("attempt", attempt),
+			zap.Duration("delay", delay),
+			zap.Error(err),
+		)
+	}
+
+	if err := backoff.Execute(ctxConn, cfg.Backoff, connect, notify); err != nil {
 		span.RecordError(err)
 		span.End()
 		_ = client.Close()
@@ -276,19 +285,26 @@ func (k *kafkaProducer) PublishMessage(ctx context.Context, msg *commonkafka.Mes
 			Key:   sarama.ByteEncoder(msg.Key),
 			Value: sarama.ByteEncoder(msg.Value),
 		}
-
 		for k, v := range msg.Headers {
 			pmsg.Headers = append(pmsg.Headers, sarama.RecordHeader{
 				Key:   []byte(k),
 				Value: v,
 			})
 		}
-
 		_, _, err := k.prod.SendMessage(pmsg)
 		return err
 	}
 
-	err := backoff.Execute(ctxPub, k.backoffCfg, k.logger, send)
+	notify := func(ctx context.Context, err error, delay time.Duration, attempt int) {
+		k.logger.WithContext(ctx).Warn("publish retry",
+			zap.String("topic", msg.Topic),
+			zap.Int("attempt", attempt),
+			zap.Duration("delay", delay),
+			zap.Error(err),
+		)
+	}
+
+	err := backoff.Execute(ctxPub, k.backoffCfg, send, notify)
 	latency := time.Since(start)
 	producerMetrics.PublishLatency.WithLabelValues(serviceLabel).Observe(latency.Seconds())
 

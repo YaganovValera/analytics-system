@@ -13,11 +13,15 @@ import (
 type Config struct {
 	Level   string
 	DevMode bool
+	Format  string // "console" | "json"
 }
 
 func (c *Config) applyDefaults() {
 	if c.Level == "" {
 		c.Level = "info"
+	}
+	if c.Format == "" {
+		c.Format = "console"
 	}
 }
 
@@ -39,7 +43,8 @@ func New(cfg Config) (*Logger, error) {
 		return nil, err
 	}
 
-	zapCfg := buildZapConfig(cfg.DevMode)
+	zapCfg := buildZapConfig(cfg.DevMode, cfg.Format)
+
 	if err := setZapLevel(&zapCfg, cfg.Level); err != nil {
 		return nil, err
 	}

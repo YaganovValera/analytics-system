@@ -79,7 +79,8 @@ func (m *Manager) Process(ctx context.Context, data *marketdatapb.MarketData) er
 
 		if !ok {
 			// попытка восстановления из Redis
-			existing, err := m.storage.Load(ctx, symbol, interval)
+			existing, err := m.storage.LoadAt(ctx, symbol, interval, ts)
+
 			if err != nil {
 				metrics.RestoreErrorsTotal.WithLabelValues(interval).Inc()
 				m.log.WithContext(ctx).Warn("restore from redis failed",
@@ -155,7 +156,7 @@ func (m *Manager) flushOne(ctx context.Context, interval, symbol string, state *
 	if err := m.sink.FlushCandle(ctx, state.Candle); err != nil {
 		return err
 	}
-	if err := m.storage.Delete(ctx, symbol, interval); err != nil {
+	if err := m.storage.DeleteAt(ctx, symbol, interval, state.Candle.Start); err != nil {
 		m.log.WithContext(ctx).Warn("delete from redis failed", zap.Error(err))
 	}
 	metrics.FlushedTotal.WithLabelValues(interval).Inc()

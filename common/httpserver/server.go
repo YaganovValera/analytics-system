@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 
 	"github.com/YaganovValera/analytics-system/common/logger"
@@ -21,9 +22,12 @@ type HTTPServer interface {
 	Run(ctx context.Context) error
 }
 
+// Middleware allows chaining HTTP handlers.
+type Middleware func(http.Handler) http.Handler
+
 // Config defines timeouts and paths for the HTTP server.
 type Config struct {
-	Addr            string // e.g. ":8080"
+	Addr            string
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -71,14 +75,21 @@ type server struct {
 }
 
 // New constructs an HTTPServer with metrics and health endpoints, plus extra routes.
-func New(cfg Config, check ReadyChecker, log *logger.Logger, extra map[string]http.Handler) (HTTPServer, error) {
+func New(
+	cfg Config,
+	check ReadyChecker,
+	log *logger.Logger,
+	extra map[string]http.Handler,
+	middlewares ...Middleware,
+) (HTTPServer, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(cfg.MetricsPath, promhttp.Handler())
+
+	mux.Handle(cfg.MetricsPath, otelhttp.NewHandler(promhttp.Handler(), "metrics"))
 	mux.HandleFunc(cfg.HealthzPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
@@ -95,17 +106,22 @@ func New(cfg Config, check ReadyChecker, log *logger.Logger, extra map[string]ht
 	})
 
 	for path, handler := range extra {
-		mux.Handle(path, handler)
+		mux.Handle(path, otelhttp.NewHandler(handler, path))
+	}
+
+	handler := http.Handler(mux)
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		handler = middlewares[i](handler)
 	}
 
 	httpSrv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
 		BaseContext: func(_ net.Listener) context.Context {
-			return context.Background() // переопределяется в Run
+			return context.Background()
 		},
 	}
 

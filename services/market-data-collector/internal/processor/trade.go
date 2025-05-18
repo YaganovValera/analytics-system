@@ -14,6 +14,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -41,12 +42,12 @@ func (tp *tradeProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	metrics.EventsTotal.Inc()
 
 	var evt struct {
-		EventType string `json:"e"` // тип события (должен быть "trade")
-		Ev        int64  `json:"E"` // event time (Unix ms)
-		S         string `json:"s"` // символ
-		P         string `json:"p"` // цена
-		Q         string `json:"q"` // объём
-		T         int64  `json:"t"` // trade ID
+		EventType string `json:"e"` // always "trade"
+		EventTime int64  `json:"E"` // renamed: Ev → EventTime
+		Symbol    string `json:"s"` // renamed: S → Symbol
+		Price     string `json:"p"` // renamed: P → Price
+		Quantity  string `json:"q"` // renamed: Q → Quantity
+		TradeID   int64  `json:"t"` // renamed: T → TradeID
 	}
 
 	if err := json.Unmarshal(raw.Data, &evt); err != nil {
@@ -55,38 +56,67 @@ func (tp *tradeProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 			zap.ByteString("raw", raw.Data),
 			zap.Error(err),
 		)
+		span.SetAttributes(attribute.String("raw_data", string(raw.Data)))
 		span.RecordError(err)
 		return nil
 	}
 
-	price, err := strconv.ParseFloat(evt.P, 64)
+	price, err := strconv.ParseFloat(evt.Price, 64)
 	if err != nil {
 		metrics.ParseErrors.Inc()
-		tp.log.WithContext(ctx).Error("invalid price", zap.String("p", evt.P), zap.Error(err))
+		tp.log.WithContext(ctx).Error("invalid price",
+			zap.String("symbol", evt.Symbol),
+			zap.String("price", evt.Price),
+			zap.Int64("trade_id", evt.TradeID),
+			zap.Error(err),
+		)
+		span.SetAttributes(
+			attribute.String("symbol", evt.Symbol),
+			attribute.String("price", evt.Price),
+			attribute.Int64("trade_id", evt.TradeID),
+		)
 		span.RecordError(err)
+
 		return nil
 	}
 
-	qty, err := strconv.ParseFloat(evt.Q, 64)
+	qty, err := strconv.ParseFloat(evt.Quantity, 64)
 	if err != nil {
 		metrics.ParseErrors.Inc()
-		tp.log.WithContext(ctx).Error("invalid quantity", zap.String("q", evt.Q), zap.Error(err))
+		tp.log.WithContext(ctx).Error("invalid quantity",
+			zap.String("symbol", evt.Symbol),
+			zap.String("quantity", evt.Quantity),
+			zap.Int64("trade_id", evt.TradeID),
+			zap.Error(err),
+		)
+		span.SetAttributes(
+			attribute.String("symbol", evt.Symbol),
+			attribute.String("quantity", evt.Quantity),
+			attribute.Int64("trade_id", evt.TradeID),
+		)
 		span.RecordError(err)
 		return nil
 	}
 
 	msg := &marketdata.MarketData{
-		Timestamp: timestamppb.New(time.UnixMilli(evt.Ev)),
-		Symbol:    evt.S,
+		Timestamp: timestamppb.New(time.UnixMilli(evt.EventTime)),
+		Symbol:    evt.Symbol,
 		Price:     price,
 		Volume:    qty,
-		TradeId:   strconv.FormatInt(evt.T, 10),
+		BidPrice:  0,
+		AskPrice:  0,
+		TradeId:   strconv.FormatInt(evt.TradeID, 10),
 	}
 
 	bytes, err := proto.Marshal(msg)
 	if err != nil {
 		metrics.SerializeErrors.Inc()
-		tp.log.WithContext(ctx).Error("marshal trade failed", zap.Error(err))
+		tp.log.WithContext(ctx).Error("marshal trade failed",
+			zap.String("symbol", evt.Symbol),
+			zap.Int64("trade_id", evt.TradeID),
+			zap.Error(err),
+		)
+		span.SetAttributes(attribute.String("symbol", evt.Symbol))
 		span.RecordError(err)
 		return err
 	}
@@ -95,10 +125,16 @@ func (tp *tradeProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	err = tp.producer.Publish(ctx, tp.topic, nil, bytes)
 	if err != nil {
 		metrics.PublishErrors.Inc()
-		tp.log.WithContext(ctx).Error("publish trade failed", zap.Error(err))
+		tp.log.WithContext(ctx).Error("publish trade failed",
+			zap.String("symbol", evt.Symbol),
+			zap.Int64("trade_id", evt.TradeID),
+			zap.Error(err),
+		)
+		span.SetAttributes(attribute.String("symbol", evt.Symbol))
 		span.RecordError(err)
 		return err
 	}
+
 	metrics.PublishLatency.Observe(time.Since(start).Seconds())
 	return nil
 }

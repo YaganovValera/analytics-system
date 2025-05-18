@@ -9,14 +9,12 @@ import (
 	cbackoff "github.com/cenkalti/backoff/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/zap"
 
-	"github.com/YaganovValera/analytics-system/common"
-	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 )
 
 func init() {
-	common.RegisterServiceLabelSetter(SetServiceLabel)
+	serviceid.Register(SetServiceLabel)
 }
 
 var (
@@ -103,6 +101,9 @@ func (c Config) validate() error {
 
 type RetryableFunc func(ctx context.Context) error
 
+// NotifyFunc используется для уведомлений о попытках
+type NotifyFunc func(ctx context.Context, err error, delay time.Duration, attempt int)
+
 type ErrMaxRetries struct {
 	Err      error
 	Attempts int
@@ -115,11 +116,9 @@ func (e *ErrMaxRetries) Error() string {
 func (e *ErrMaxRetries) Unwrap() error { return e.Err }
 func Permanent(err error) error        { return cbackoff.Permanent(err) }
 
-func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFunc) error {
-	if serviceLabel == "unknown" {
-		log.Warn("backoff: service label not set", zap.String("service", serviceLabel))
-	}
-
+// Execute выполняет fn с exponential backoff и метриками.
+// Не логирует ошибки напрямую — логика выносится в notify.
+func Execute(ctx context.Context, cfg Config, fn RetryableFunc, notify NotifyFunc) error {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return fmt.Errorf("backoff: invalid config: %w", err)
@@ -146,22 +145,16 @@ func Execute(ctx context.Context, cfg Config, log *logger.Logger, fn RetryableFu
 		return fn(ctx)
 	}
 
-	notify := func(err error, delay time.Duration) {
+	notifyWrap := func(err error, delay time.Duration) {
 		metrics.Retries.WithLabelValues(serviceLabel).Inc()
 		metrics.Delays.WithLabelValues(serviceLabel).Observe(delay.Seconds())
-		log.WithContext(ctx).Warn("back-off retry",
-			zap.Int("attempt", attempts),
-			zap.Duration("delay", delay),
-			zap.Error(err),
-		)
+		if notify != nil {
+			notify(ctx, err, delay, attempts)
+		}
 	}
 
-	if err := cbackoff.RetryNotify(operation, boCtx, notify); err != nil {
+	if err := cbackoff.RetryNotify(operation, boCtx, notifyWrap); err != nil {
 		metrics.Failures.WithLabelValues(serviceLabel).Inc()
-		log.WithContext(ctx).Error("back-off give-up",
-			zap.Int("attempts", attempts),
-			zap.Error(err),
-		)
 		return &ErrMaxRetries{Err: err, Attempts: attempts}
 	}
 

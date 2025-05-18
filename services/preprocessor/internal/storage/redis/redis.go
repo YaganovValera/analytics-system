@@ -1,6 +1,5 @@
 // github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/redis/redis.go
 
-// internal/storage/redis/redis.go
 package redis
 
 import (
@@ -48,7 +47,6 @@ func NewRedisStorage(cfg RedisConfig, log *logger.Logger) (*RedisStorage, error)
 }
 
 func redisKey(symbol, interval string, start time.Time) string {
-	// ISO8601 to prevent rounding issues between nodes
 	return fmt.Sprintf("ohlcv:%s:%s:%s", symbol, interval, start.UTC().Format("2006-01-02T15:04:05Z"))
 }
 
@@ -77,8 +75,8 @@ func (s *RedisStorage) Save(ctx context.Context, c *aggregator.Candle) error {
 	return nil
 }
 
-func (s *RedisStorage) Load(ctx context.Context, symbol, interval string) (*aggregator.Candle, error) {
-	ctx, span := tracer.Start(ctx, "Redis.Load")
+func (s *RedisStorage) LoadAt(ctx context.Context, symbol, interval string, ts time.Time) (*aggregator.Candle, error) {
+	ctx, span := tracer.Start(ctx, "Redis.LoadAt")
 	defer span.End()
 
 	dur, err := aggregator.IntervalDuration(interval)
@@ -86,8 +84,7 @@ func (s *RedisStorage) Load(ctx context.Context, symbol, interval string) (*aggr
 		return nil, fmt.Errorf("invalid interval duration: %w", err)
 	}
 
-	now := time.Now().UTC()
-	start := aggregator.AlignToInterval(now, dur)
+	start := aggregator.AlignToInterval(ts, dur)
 	key := redisKey(symbol, interval, start)
 	val, err := s.rdb.Get(ctx, key).Bytes()
 
@@ -104,7 +101,7 @@ func (s *RedisStorage) Load(ctx context.Context, symbol, interval string) (*aggr
 		return nil, fmt.Errorf("unmarshal failed: %w", err)
 	}
 
-	c := &aggregator.Candle{
+	return &aggregator.Candle{
 		Symbol:   pb.Symbol,
 		Interval: interval,
 		Start:    pb.OpenTime.AsTime(),
@@ -115,12 +112,11 @@ func (s *RedisStorage) Load(ctx context.Context, symbol, interval string) (*aggr
 		Close:    pb.Close,
 		Volume:   pb.Volume,
 		Complete: false,
-	}
-	return c, nil
+	}, nil
 }
 
-func (s *RedisStorage) Delete(ctx context.Context, symbol, interval string) error {
-	ctx, span := tracer.Start(ctx, "Redis.Delete")
+func (s *RedisStorage) DeleteAt(ctx context.Context, symbol, interval string, ts time.Time) error {
+	ctx, span := tracer.Start(ctx, "Redis.DeleteAt")
 	defer span.End()
 
 	dur, err := aggregator.IntervalDuration(interval)
@@ -128,11 +124,24 @@ func (s *RedisStorage) Delete(ctx context.Context, symbol, interval string) erro
 		return fmt.Errorf("invalid interval duration: %w", err)
 	}
 
-	start := aggregator.AlignToInterval(time.Now().UTC(), dur)
+	start := aggregator.AlignToInterval(ts, dur)
 	key := redisKey(symbol, interval, start)
 	if err := s.rdb.Del(ctx, key).Err(); err != nil {
 		s.log.WithContext(ctx).Error("redis delete failed", zap.String("key", key), zap.Error(err))
 		return fmt.Errorf("redis delete failed: %w", err)
 	}
 	return nil
+}
+
+// Optional fallback — оставлены как обёртки на случай совместимости
+func (s *RedisStorage) Load(ctx context.Context, symbol, interval string) (*aggregator.Candle, error) {
+	return s.LoadAt(ctx, symbol, interval, time.Now().UTC())
+}
+
+func (s *RedisStorage) Delete(ctx context.Context, symbol, interval string) error {
+	return s.DeleteAt(ctx, symbol, interval, time.Now().UTC())
+}
+
+func (s *RedisStorage) Close() error {
+	return s.rdb.Close()
 }

@@ -14,14 +14,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/YaganovValera/analytics-system/common"
 	"github.com/YaganovValera/analytics-system/common/backoff"
 	commonkafka "github.com/YaganovValera/analytics-system/common/kafka"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 )
 
 func init() {
-	common.RegisterServiceLabelSetter(SetServiceLabel)
+	serviceid.Register(SetServiceLabel)
 }
 
 // -----------------------------------------------------------------------------
@@ -127,6 +127,7 @@ func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Consu
 	sarCfg := sarama.NewConfig()
 	sarCfg.Version = version
 	sarCfg.Consumer.Return.Errors = true
+	sarCfg.Consumer.Offsets.Initial = sarama.OffsetOldest
 
 	var group sarama.ConsumerGroup
 	connectOp := func(ctx context.Context) error {
@@ -142,7 +143,16 @@ func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Consu
 
 	ctxConn, span := tracer.Start(ctx, "Connect",
 		trace.WithAttributes(attribute.StringSlice("brokers", cfg.Brokers), attribute.String("group", cfg.GroupID)))
-	if err := backoff.Execute(ctxConn, cfg.Backoff, log, connectOp); err != nil {
+
+	notify := func(ctx context.Context, err error, delay time.Duration, attempt int) {
+		log.WithContext(ctx).Warn("kafka consumer retry",
+			zap.Int("attempt", attempt),
+			zap.Duration("delay", delay),
+			zap.Error(err),
+		)
+	}
+
+	if err := backoff.Execute(ctxConn, cfg.Backoff, connectOp, notify); err != nil {
 		span.RecordError(err)
 		span.End()
 		return nil, fmt.Errorf("kafka consumer: connect failed: %w", err)
@@ -182,7 +192,15 @@ func (kc *kafkaConsumerGroup) Consume(
 					return ctx.Err()
 				}
 			}
-			if berr := backoff.Execute(ctx, kc.backoffCfg, kc.log, pause); berr != nil {
+
+			notify := func(ctx context.Context, err error, delay time.Duration, attempt int) {
+				kc.log.WithContext(ctx).Warn("pause between kafka sessions failed",
+					zap.Int("attempt", attempt),
+					zap.Duration("delay", delay),
+					zap.Error(err),
+				)
+			}
+			if berr := backoff.Execute(ctx, kc.backoffCfg, pause, notify); berr != nil {
 				return fmt.Errorf("kafka consumer: pause between sessions failed: %w", berr)
 			}
 			continue
@@ -212,39 +230,47 @@ func (h *consumerGroupHandler) Setup(_ sarama.ConsumerGroupSession) error   { re
 func (h *consumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 
 func (h *consumerGroupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	for m := range claim.Messages() {
-		ctxMsg := sess.Context()
-		_, span := tracer.Start(ctxMsg, "HandleMessage",
-			trace.WithAttributes(
-				attribute.String("topic", m.Topic),
-				attribute.Int64("offset", m.Offset),
-			),
-		)
-
-		headers := make(map[string][]byte, len(m.Headers))
-		for _, hdr := range m.Headers {
-			if hdr != nil && hdr.Key != nil && hdr.Value != nil {
-				headers[string(hdr.Key)] = hdr.Value
+	for {
+		select {
+		case <-sess.Context().Done():
+			return sess.Context().Err()
+		case m, ok := <-claim.Messages():
+			if !ok {
+				return nil
 			}
-		}
 
-		msg := &commonkafka.Message{
-			Key:       m.Key,
-			Value:     m.Value,
-			Topic:     m.Topic,
-			Partition: m.Partition,
-			Offset:    m.Offset,
-			Timestamp: m.Timestamp,
-			Headers:   headers,
-		}
+			ctxMsg := sess.Context()
+			_, span := tracer.Start(ctxMsg, "HandleMessage",
+				trace.WithAttributes(
+					attribute.String("topic", m.Topic),
+					attribute.Int64("offset", m.Offset),
+				),
+			)
 
-		if err := h.handler(msg); err != nil {
-			span.RecordError(err)
-			h.log.WithContext(ctxMsg).Error("handler error", zap.Error(err))
-		} else {
-			sess.MarkMessage(m, "")
+			headers := make(map[string][]byte, len(m.Headers))
+			for _, hdr := range m.Headers {
+				if hdr != nil && hdr.Key != nil && hdr.Value != nil {
+					headers[string(hdr.Key)] = hdr.Value
+				}
+			}
+
+			msg := &commonkafka.Message{
+				Key:       m.Key,
+				Value:     m.Value,
+				Topic:     m.Topic,
+				Partition: m.Partition,
+				Offset:    m.Offset,
+				Timestamp: m.Timestamp,
+				Headers:   headers,
+			}
+
+			if err := h.handler(msg); err != nil {
+				span.RecordError(err)
+				h.log.WithContext(ctxMsg).Error("handler error", zap.Error(err))
+			} else {
+				sess.MarkMessage(m, "")
+			}
+			span.End()
 		}
-		span.End()
 	}
-	return nil
 }

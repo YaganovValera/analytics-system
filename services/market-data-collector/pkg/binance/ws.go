@@ -91,11 +91,20 @@ func (c *connector) run(ctx context.Context, ch chan<- RawMessage) {
 
 func (c *connector) connect(ctx context.Context) (*websocket.Conn, error) {
 	var conn *websocket.Conn
-	err := backoff.Execute(ctx, c.cfg.BackoffConfig, c.log, func(ctx context.Context) error {
+
+	err := backoff.Execute(ctx, c.cfg.BackoffConfig, func(ctx context.Context) error {
 		var err error
 		conn, _, err = websocket.DefaultDialer.DialContext(ctx, c.cfg.URL, nil)
 		return err
+	}, func(ctx context.Context, err error, delay time.Duration, attempt int) {
+		c.log.WithContext(ctx).Warn("binance ws connect retry",
+			zap.Int("attempt", attempt),
+			zap.Duration("delay", delay),
+			zap.Error(err),
+			zap.String("url", c.cfg.URL),
+		)
 	})
+
 	return conn, err
 }
 
@@ -144,8 +153,21 @@ func (c *connector) readLoop(ctx context.Context, conn *websocket.Conn, out chan
 		}
 		_, rawBytes, err := conn.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseAbnormalClosure,
+			) {
+				c.log.Info("ws: connection closed",
+					zap.String("symbol", c.cfg.Streams[0]),
+					zap.Error(err),
+				)
+			} else {
+				c.log.Warn("ws: read error", zap.Error(err))
+			}
 			return err
 		}
+
 		var wrapper struct {
 			Stream string          `json:"stream"`
 			Data   json.RawMessage `json:"data"`
