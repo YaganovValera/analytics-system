@@ -10,9 +10,9 @@ import "v1/common/common.proto";
 
 // OHLCV candle data point.
 message Candle {
-  google.protobuf.Timestamp open_time = 1;
-  google.protobuf.Timestamp close_time = 2;
-  string symbol = 3;
+  google.protobuf.Timestamp open_time = 1; // Start of interval
+  google.protobuf.Timestamp close_time = 2; // End of interval
+  string symbol = 3;                        // Trading symbol (e.g. BTCUSDT, upper-case ASCII)
   double open = 4;
   double high = 5;
   double low = 6;
@@ -21,13 +21,25 @@ message Candle {
 }
 
 // Request to retrieve historical candle data.
-message GetCandlesRequest {
-  string symbol = 1;
-  google.protobuf.Timestamp start = 2;
-  google.protobuf.Timestamp end = 3;
-  market.common.v1.AggregationInterval interval = 4;
+message QueryCandlesRequest {
+  string symbol = 1;                                // Symbol to query (e.g. BTCUSDT)
+  google.protobuf.Timestamp start = 2;              // Inclusive start time
+  google.protobuf.Timestamp end = 3;                // Exclusive end time
+  market.common.v1.AggregationInterval interval = 4; // REQUIRED: must not be UNSPECIFIED
   market.common.v1.Pagination pagination = 5;
   market.common.v1.RequestMetadata metadata = 6;
+}
+
+// Request to subscribe to real-time candle stream.
+message StreamCandlesRequest {
+  string symbol = 1;                                // Symbol to stream
+  market.common.v1.AggregationInterval interval = 2; // REQUIRED: must not be UNSPECIFIED
+  market.common.v1.RequestMetadata metadata = 3;
+}
+
+// Response with paginated candle data.
+message GetCandlesResponse {
+  repeated Candle candles = 1;
   string next_page_token = 2;
 }
 
@@ -39,7 +51,37 @@ message CandleEvent {
   }
 }
 
+// Optional acknowledgment from client in bidirectional stream
+message Ack {
+  string candle_id = 1; // Optional ID of processed candle (could be symbol+ts)
+}
+
+// Optional flow control or hints from server to client
+message FlowControl {
+  string message = 1; // e.g. "throttling", "resync required"
+}
+
+// Bi-directional stream request from client
+message CandleStreamRequest {
+  oneof payload {
+    StreamCandlesRequest subscribe = 1;
+    Ack ack = 2;
+  }
+}
+
+// Bi-directional stream response from server
+message CandleStreamResponse {
+  oneof payload {
+    CandleEvent event = 1;
+    FlowControl control = 2;
+  }
+}
+
+// Analytics API — historical and real-time OHLCV access.
 service AnalyticsService {
-  rpc GetCandles(GetCandlesRequest) returns (GetCandlesResponse);
-  rpc StreamCandles(GetCandlesRequest) returns (stream CandleEvent);
+  rpc GetCandles(QueryCandlesRequest) returns (GetCandlesResponse);
+  rpc StreamCandles(StreamCandlesRequest) returns (stream CandleEvent);
+
+  // Future-proof bi-directional stream with optional ACK and control
+  rpc SubscribeCandles(stream CandleStreamRequest) returns (stream CandleStreamResponse);
 }

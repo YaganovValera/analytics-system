@@ -19,14 +19,22 @@ message RequestMetadata {
 
 // Supported aggregation intervals for analytics queries.
 enum AggregationInterval {
+  // Do not use. Must be explicitly set by client.
   AGG_INTERVAL_UNSPECIFIED = 0;
+  // 1-minute OHLCV interval
   AGG_INTERVAL_1_MINUTE = 1;
+  // 5-minute OHLCV interval
   AGG_INTERVAL_5_MINUTES = 2;
+  // 15-minute OHLCV interval
   AGG_INTERVAL_15_MINUTES = 3;
+  // 1-hour OHLCV interval
   AGG_INTERVAL_1_HOUR = 4;
+  // 4-hour OHLCV interval
   AGG_INTERVAL_4_HOURS = 5;
+  // 1-day OHLCV interval
   AGG_INTERVAL_1_DAY = 6;
 }
+
 
 // Request to retrieve a paginated list of available market symbols.
 message ListSymbolsRequest {

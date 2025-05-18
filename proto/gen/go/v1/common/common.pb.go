@@ -27,13 +27,20 @@ const (
 type AggregationInterval int32
 
 const (
+	// Do not use. Must be explicitly set by client.
 	AggregationInterval_AGG_INTERVAL_UNSPECIFIED AggregationInterval = 0
-	AggregationInterval_AGG_INTERVAL_1_MINUTE    AggregationInterval = 1
-	AggregationInterval_AGG_INTERVAL_5_MINUTES   AggregationInterval = 2
-	AggregationInterval_AGG_INTERVAL_15_MINUTES  AggregationInterval = 3
-	AggregationInterval_AGG_INTERVAL_1_HOUR      AggregationInterval = 4
-	AggregationInterval_AGG_INTERVAL_4_HOURS     AggregationInterval = 5
-	AggregationInterval_AGG_INTERVAL_1_DAY       AggregationInterval = 6
+	// 1-minute OHLCV interval
+	AggregationInterval_AGG_INTERVAL_1_MINUTE AggregationInterval = 1
+	// 5-minute OHLCV interval
+	AggregationInterval_AGG_INTERVAL_5_MINUTES AggregationInterval = 2
+	// 15-minute OHLCV interval
+	AggregationInterval_AGG_INTERVAL_15_MINUTES AggregationInterval = 3
+	// 1-hour OHLCV interval
+	AggregationInterval_AGG_INTERVAL_1_HOUR AggregationInterval = 4
+	// 4-hour OHLCV interval
+	AggregationInterval_AGG_INTERVAL_4_HOURS AggregationInterval = 5
+	// 1-day OHLCV interval
+	AggregationInterval_AGG_INTERVAL_1_DAY AggregationInterval = 6
 )
 
 // Enum value maps for AggregationInterval.
