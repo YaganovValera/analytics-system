@@ -89,6 +89,13 @@ func (w *TimescaleWriter) FlushCandle(ctx context.Context, c *aggregator.Candle)
 	return nil
 }
 
+// Ping проверяет доступность TimescaleDB.
+func (w *TimescaleWriter) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return w.db.Ping(ctx)
+}
+
 // Close завершает соединение с БД.
 func (w *TimescaleWriter) Close() {
 	w.db.Close()

@@ -1,9 +1,11 @@
+// github.com/YaganovValera/analytics-system/services/analytics-api/internal/app/app.go
 // internal/app/app.go
 package app
 
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common"
@@ -11,10 +13,17 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/config"
+	grpcapi "github.com/YaganovValera/analytics-system/services/analytics-api/internal/grpc"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/kafka"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/timescaledb"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase"
 
+	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	grpcstd "google.golang.org/grpc"
 )
 
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
@@ -35,10 +44,38 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
-	// TODO: Инициализация TimescaleDB и Kafka будет позже
+	db, err := timescaledb.New(cfg.Timescale, log)
+	if err != nil {
+		return fmt.Errorf("timescaledb: %w", err)
+	}
+
+	kafkaRepo, err := kafka.New(ctx, cfg.Kafka, log)
+	if err != nil {
+		return fmt.Errorf("kafka: %w", err)
+	}
+	defer kafkaRepo.Close()
+
+	grpcServer := grpcstd.NewServer(
+		grpcstd.StatsHandler(otelgrpc.NewServerHandler()),
+	)
+
+	analyticsHandler := grpcapi.NewServer(
+		usecase.NewGetCandlesHandler(db),
+		usecase.NewStreamCandlesHandler(kafkaRepo),
+	)
+	analyticspb.RegisterAnalyticsServiceServer(grpcServer, analyticsHandler)
+
+	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.HTTP.Port+1))
+	if err != nil {
+		return fmt.Errorf("listen grpc: %w", err)
+	}
 
 	readiness := func() error {
-		// TODO: Пинг Timescale и Kafka здесь
+		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctxPing); err != nil {
+			return fmt.Errorf("timescaledb not ready: %w", err)
+		}
 		return nil
 	}
 
@@ -58,10 +95,8 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	log.WithContext(ctx).Info("analytics-api: components initialized, starting run loops")
 	g, ctx := errgroup.WithContext(ctx)
-
 	g.Go(func() error { return httpSrv.Run(ctx) })
-
-	// TODO: gRPC server запуск пойдет позже
+	g.Go(func() error { return grpcServer.Serve(grpcLis) })
 
 	if err := g.Wait(); err != nil {
 		if ctx.Err() == context.Canceled {

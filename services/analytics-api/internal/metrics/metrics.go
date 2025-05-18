@@ -1,4 +1,4 @@
-// services/analytics-api/internal/metrics/metrics.go
+// github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics/metrics.go
 package metrics
 
 import (
@@ -8,65 +8,42 @@ import (
 )
 
 var (
-	once sync.Once
-
-	// GetCandles metrics
-	GetCandlesRequests prometheus.Counter
-	GetCandlesErrors   prometheus.Counter
-	GetCandlesLatency  prometheus.Histogram
-
-	// StreamCandles metrics
-	StreamCandlesRequests prometheus.Counter
-	StreamCandlesErrors   prometheus.Counter
-	StreamCandlesEvents   prometheus.Counter
+	once              sync.Once
+	GRPCRequestsTotal *prometheus.CounterVec
+	StreamEventsTotal *prometheus.CounterVec
+	QueryLatency      *prometheus.HistogramVec
 )
 
-// Register инициализирует и регистрирует все метрики.
-// Если r == nil, используется prometheus.DefaultRegisterer.
-// Дублирующая регистрация игнорируется.
+// Register инициализирует и регистрирует метрики analytics-api.
 func Register(r prometheus.Registerer) {
 	once.Do(func() {
 		if r == nil {
 			r = prometheus.DefaultRegisterer
 		}
 
-		GetCandlesRequests = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "get_candles_requests_total",
-			Help: "Total number of GetCandles calls",
-		})
-		GetCandlesErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "get_candles_errors_total",
-			Help: "Total number of errors in GetCandles",
-		})
-		GetCandlesLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "get_candles_latency_seconds",
-			Help:    "Latency distribution of GetCandles calls",
-			Buckets: prometheus.DefBuckets,
-		})
+		GRPCRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "analytics", Subsystem: "grpc", Name: "requests_total",
+			Help: "Total gRPC requests by method",
+		}, []string{"method"})
 
-		StreamCandlesRequests = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "stream_candles_requests_total",
-			Help: "Total number of StreamCandles calls",
-		})
-		StreamCandlesErrors = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "stream_candles_errors_total",
-			Help: "Total number of errors in StreamCandles",
-		})
-		StreamCandlesEvents = prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "analytics_api", Subsystem: "storage", Name: "stream_candles_events_total",
-			Help: "Total number of CandleEvents emitted by StreamCandles",
-		})
+		StreamEventsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "analytics", Subsystem: "stream", Name: "events_total",
+			Help: "Total streamed candle events",
+		}, []string{"interval"})
+
+		QueryLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "analytics", Subsystem: "query", Name: "latency_seconds",
+			Help:    "Latency of TimescaleDB queries",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"interval"})
 
 		collectors := []prometheus.Collector{
-			GetCandlesRequests, GetCandlesErrors, GetCandlesLatency,
-			StreamCandlesRequests, StreamCandlesErrors, StreamCandlesEvents,
+			GRPCRequestsTotal,
+			StreamEventsTotal,
+			QueryLatency,
 		}
 		for _, c := range collectors {
-			if err := r.Register(c); err != nil {
-				if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-					panic(err)
-				}
-			}
+			_ = r.Register(c)
 		}
 	})
 }

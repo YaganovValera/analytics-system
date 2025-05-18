@@ -1,27 +1,36 @@
+# github.com/YaganovValera/analytics-system/services/analytics-api/config/config.yaml
+
 service_name:    "analytics-api"
 service_version: "v1.0.0"
 
-http:
-  port:               9090
-  read_timeout:       "10s"
-  write_timeout:      "15s"
-  idle_timeout:       "60s"
-  shutdown_timeout:   "5s"
-  metrics_path:       "/metrics"
-  healthz_path:       "/healthz"
-  readyz_path:        "/readyz"
-
-postgres:
-  dsn:               "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
-  max_open_conns:    10
-  max_idle_conns:    5
-  conn_max_lifetime: "1h"
+logging:
+  level:    "info"        # debug | info | warn | error
+  dev_mode: false
 
 telemetry:
-  otel_endpoint:    "otel-collector:4317"
-  insecure:         false
-  sampler:          1.0
+  otel_endpoint: "otel-collector:4317"
+  insecure: true
 
-logging:
-  level:    "info"
-  dev_mode: false
+http:
+  port: 8082
+  read_timeout: "10s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "5s"
+  metrics_path: "/metrics"
+  healthz_path: "/healthz"
+  readyz_path: "/readyz"
+
+timescaledb:
+  dsn: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+
+kafka:
+  brokers:
+    - "kafka:9092"
+  group_id: "analytics-api"
+  version: "2.8.0"
+  topic_prefix: "candles"
+  backoff:
+    initial_interval: "1s"
+    max_interval: "30s"
+    max_elapsed_time: "5m"

@@ -92,7 +92,15 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	consumer := kafka.New(kc, []string{cfg.Kafka.RawTopic}, agg.Process, log)
 
-	readiness := func() error { return nil }
+	readiness := func() error {
+		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := timescale.Ping(ctxPing); err != nil {
+			return fmt.Errorf("timescaledb not ready: %w", err)
+		}
+		return nil
+	}
+
 	httpSrv, err := httpserver.New(httpserver.Config{
 		Addr:            fmt.Sprintf(":%d", cfg.HTTP.Port),
 		ReadTimeout:     cfg.HTTP.ReadTimeout,
