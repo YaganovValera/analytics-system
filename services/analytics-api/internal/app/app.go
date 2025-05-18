@@ -1,5 +1,4 @@
 // github.com/YaganovValera/analytics-system/services/analytics-api/internal/app/app.go
-// internal/app/app.go
 package app
 
 import (
@@ -20,6 +19,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase"
 
 	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
+
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -30,6 +30,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	common.InitServiceName(cfg.ServiceName)
 	metrics.Register(nil)
 
+	// Telemetry
 	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
 		Endpoint:        cfg.Telemetry.OTLPEndpoint,
 		ServiceName:     cfg.ServiceName,
@@ -44,17 +45,21 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
+	// TimescaleDB
 	db, err := timescaledb.New(cfg.Timescale, log)
 	if err != nil {
 		return fmt.Errorf("timescaledb: %w", err)
 	}
+	defer db.Close()
 
+	// Kafka
 	kafkaRepo, err := kafka.New(ctx, cfg.Kafka, log)
 	if err != nil {
 		return fmt.Errorf("kafka: %w", err)
 	}
 	defer kafkaRepo.Close()
 
+	// gRPC server
 	grpcServer := grpcstd.NewServer(
 		grpcstd.StatsHandler(otelgrpc.NewServerHandler()),
 	)
@@ -70,9 +75,11 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("listen grpc: %w", err)
 	}
 
+	// Readiness проверяет и БД, и Kafka
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
+
 		if err := db.Ping(ctxPing); err != nil {
 			return fmt.Errorf("timescaledb not ready: %w", err)
 		}
@@ -95,6 +102,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	log.WithContext(ctx).Info("analytics-api: components initialized, starting run loops")
 	g, ctx := errgroup.WithContext(ctx)
+
 	g.Go(func() error { return httpSrv.Run(ctx) })
 	g.Go(func() error { return grpcServer.Serve(grpcLis) })
 

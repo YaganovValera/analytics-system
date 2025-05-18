@@ -19,6 +19,7 @@ import (
 type Repository interface {
 	QueryCandles(ctx context.Context, symbol string, interval string, start, end time.Time, page *commonpb.Pagination) ([]*analyticspb.Candle, string, error)
 	Ping(ctx context.Context) error
+	Close()
 }
 
 type timescaleRepo struct {
@@ -72,4 +73,8 @@ func (r *timescaleRepo) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return r.db.Ping(ctx)
+}
+
+func (r *timescaleRepo) Close() {
+	r.db.Close()
 }

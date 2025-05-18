@@ -1,5 +1,4 @@
 // github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase/handler.go
-// internal/usecase/handler.go
 package usecase
 
 import (
@@ -13,23 +12,31 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-type GetCandlesHandler struct {
+type GetCandlesHandler interface {
+	Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (*analyticspb.GetCandlesResponse, error)
+}
+
+type StreamCandlesHandler interface {
+	Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (<-chan *analyticspb.CandleEvent, error)
+}
+
+type getHandler struct {
 	db timescaledb.Repository
 }
 
-type StreamCandlesHandler struct {
+type streamHandler struct {
 	kafka kafka.Repository
 }
 
-func NewGetCandlesHandler(db timescaledb.Repository) *GetCandlesHandler {
-	return &GetCandlesHandler{db: db}
+func NewGetCandlesHandler(db timescaledb.Repository) GetCandlesHandler {
+	return &getHandler{db: db}
 }
 
-func NewStreamCandlesHandler(kafka kafka.Repository) *StreamCandlesHandler {
-	return &StreamCandlesHandler{kafka: kafka}
+func NewStreamCandlesHandler(kafka kafka.Repository) StreamCandlesHandler {
+	return &streamHandler{kafka: kafka}
 }
 
-func (h *GetCandlesHandler) Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (*analyticspb.GetCandlesResponse, error) {
+func (h *getHandler) Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (*analyticspb.GetCandlesResponse, error) {
 	ctx, span := otel.Tracer("analytics-api/usecase").Start(ctx, "GetCandles")
 	defer span.End()
 
@@ -45,7 +52,7 @@ func (h *GetCandlesHandler) Handle(ctx context.Context, req *analyticspb.GetCand
 	}, nil
 }
 
-func (h *StreamCandlesHandler) Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (<-chan *analyticspb.CandleEvent, error) {
+func (h *streamHandler) Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (<-chan *analyticspb.CandleEvent, error) {
 	ctx, span := otel.Tracer("analytics-api/usecase").Start(ctx, "StreamCandles")
 	defer span.End()
 
@@ -54,26 +61,5 @@ func (h *StreamCandlesHandler) Handle(ctx context.Context, req *analyticspb.GetC
 	}
 
 	topic := fmt.Sprintf("candles.%s", req.Interval.String())
-	stream, err := h.kafka.ConsumeCandles(ctx, topic, req.Symbol)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	out := make(chan *analyticspb.CandleEvent, 100)
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case evt, ok := <-stream:
-				if !ok {
-					return
-				}
-				out <- &analyticspb.CandleEvent{Payload: &analyticspb.CandleEvent_Candle{Candle: evt}}
-			}
-		}
-	}()
-	return out, nil
+	return h.kafka.ConsumeCandles(ctx, topic, req.Symbol)
 }

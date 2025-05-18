@@ -1,12 +1,15 @@
 // github.com/YaganovValera/analytics-system/services/analytics-api/internal/grpc/handler.go
-// internal/grpc/handler.go
 package grpc
 
 import (
 	"context"
 
+	"github.com/YaganovValera/analytics-system/common/ctxkeys"
 	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
+	commonpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/common"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase"
+
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,25 +17,30 @@ import (
 
 type Server struct {
 	analyticspb.UnimplementedAnalyticsServiceServer
-	getHandler    GetCandlesHandler
-	streamHandler StreamCandlesHandler
+	getHandler    usecase.GetCandlesHandler
+	streamHandler usecase.StreamCandlesHandler
 }
 
-func NewServer(get GetCandlesHandler, stream StreamCandlesHandler) *Server {
+func NewServer(get usecase.GetCandlesHandler, stream usecase.StreamCandlesHandler) *Server {
 	return &Server{
 		getHandler:    get,
 		streamHandler: stream,
 	}
 }
 
-// GetCandles handles unary request to fetch historical candles.
 func (s *Server) GetCandles(ctx context.Context, req *analyticspb.GetCandlesRequest) (*analyticspb.GetCandlesResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is nil")
+	}
+
 	ctx, span := otel.Tracer("analytics-api/grpc").Start(ctx, "GetCandles")
 	defer span.End()
 	metrics.GRPCRequestsTotal.WithLabelValues("GetCandles").Inc()
 
-	if req == nil || req.Symbol == "" || req.Interval == 0 {
-		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	ctx = enrichContextWithMetadata(ctx, req.Metadata)
+
+	if req.Symbol == "" || req.Interval == 0 {
+		return nil, status.Error(codes.InvalidArgument, "invalid symbol or interval")
 	}
 
 	resp, err := s.getHandler.Handle(ctx, req)
@@ -43,14 +51,19 @@ func (s *Server) GetCandles(ctx context.Context, req *analyticspb.GetCandlesRequ
 	return resp, nil
 }
 
-// StreamCandles streams candle events from Kafka to client.
 func (s *Server) StreamCandles(req *analyticspb.GetCandlesRequest, stream analyticspb.AnalyticsService_StreamCandlesServer) error {
+	if req == nil {
+		return status.Error(codes.InvalidArgument, "request is nil")
+	}
+
 	ctx, span := otel.Tracer("analytics-api/grpc").Start(stream.Context(), "StreamCandles")
 	defer span.End()
 	metrics.GRPCRequestsTotal.WithLabelValues("StreamCandles").Inc()
 
-	if req == nil || req.Symbol == "" || req.Interval == 0 {
-		return status.Error(codes.InvalidArgument, "invalid request")
+	ctx = enrichContextWithMetadata(ctx, req.Metadata)
+
+	if req.Symbol == "" || req.Interval == 0 {
+		return status.Error(codes.InvalidArgument, "invalid symbol or interval")
 	}
 
 	ch, err := s.streamHandler.Handle(ctx, req)
@@ -75,11 +88,18 @@ func (s *Server) StreamCandles(req *analyticspb.GetCandlesRequest, stream analyt
 	}
 }
 
-// Handler interfaces to be implemented in usecase.
-type GetCandlesHandler interface {
-	Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (*analyticspb.GetCandlesResponse, error)
-}
-
-type StreamCandlesHandler interface {
-	Handle(ctx context.Context, req *analyticspb.GetCandlesRequest) (<-chan *analyticspb.CandleEvent, error)
+func enrichContextWithMetadata(ctx context.Context, meta *commonpb.RequestMetadata) context.Context {
+	if meta == nil {
+		return ctx
+	}
+	if meta.TraceId != "" {
+		ctx = context.WithValue(ctx, ctxkeys.TraceIDKey, meta.TraceId)
+	}
+	if meta.IpAddress != "" {
+		ctx = context.WithValue(ctx, ctxkeys.IPAddressKey, meta.IpAddress)
+	}
+	if meta.UserAgent != "" {
+		ctx = context.WithValue(ctx, ctxkeys.UserAgentKey, meta.UserAgent)
+	}
+	return ctx
 }

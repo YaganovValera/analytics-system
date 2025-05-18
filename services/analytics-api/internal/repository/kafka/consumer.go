@@ -1,5 +1,4 @@
 // github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/kafka/consumer.go
-// internal/repository/kafka/consumer.go
 package kafka
 
 import (
@@ -15,10 +14,12 @@ import (
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/transport"
 
 	"go.uber.org/zap"
+	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
+	"google.golang.org/grpc/codes"
 )
 
 type Repository interface {
-	ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.Candle, error)
+	ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.CandleEvent, error)
 	Close() error
 }
 
@@ -40,26 +41,52 @@ func New(ctx context.Context, cfg config.KafkaConfig, log *logger.Logger) (Repos
 	return &kafkaRepo{consumer: consumer, log: log.Named("kafka")}, nil
 }
 
-func (r *kafkaRepo) ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.Candle, error) {
-	out := make(chan *analyticspb.Candle, 100)
+func (r *kafkaRepo) ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.CandleEvent, error) {
+	out := make(chan *analyticspb.CandleEvent, 100)
+
 	go func() {
+		defer close(out)
+
 		err := r.consumer.Consume(ctx, []string{topic}, func(msg *commonkafka.Message) error {
 			if len(msg.Key) > 0 && !strings.EqualFold(string(msg.Key), symbol) {
 				return nil
 			}
+
 			candle, err := transport.UnmarshalCandleFromBytes(msg.Value)
 			if err != nil {
 				r.log.WithContext(ctx).Error("unmarshal candle failed", zap.Error(err))
+				out <- &analyticspb.CandleEvent{
+					Payload: &analyticspb.CandleEvent_Error{
+						Error: &rpcstatus.Status{
+							Code:    int32(codes.Internal),
+							Message: "failed to unmarshal candle",
+						},
+					},
+				}
 				return nil
 			}
-			out <- candle
+
+			out <- &analyticspb.CandleEvent{
+				Payload: &analyticspb.CandleEvent_Candle{
+					Candle: candle,
+				},
+			}
 			return nil
 		})
-		if err != nil {
+
+		if err != nil && ctx.Err() == nil {
 			r.log.WithContext(ctx).Error("kafka consume failed", zap.Error(err))
+			out <- &analyticspb.CandleEvent{
+				Payload: &analyticspb.CandleEvent_Error{
+					Error: &rpcstatus.Status{
+						Code:    int32(codes.Unavailable),
+						Message: fmt.Sprintf("kafka consume failed: %v", err),
+					},
+				},
+			}
 		}
-		close(out)
 	}()
+
 	return out, nil
 }
 
