@@ -1,6 +1,6 @@
 // github.com/YaganovValera/analytics-system/services/preprocessor/internal/app/preprocessor.go
 
-// internal/app/preprocessor.go
+// services/preprocessor/internal/app/preprocessor.go
 package app
 
 import (
@@ -8,135 +8,143 @@ import (
 	"fmt"
 	"time"
 
-	httpserver "github.com/YaganovValera/analytics-system/common/httpserver"
+	"github.com/YaganovValera/analytics-system/common/httpserver"
 	"github.com/YaganovValera/analytics-system/common/kafka/consumer"
 	"github.com/YaganovValera/analytics-system/common/kafka/producer"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	commonredis "github.com/YaganovValera/analytics-system/common/redis"
 	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
+
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/config"
-	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/kafka"
+	precons "github.com/YaganovValera/analytics-system/services/preprocessor/internal/kafka"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/metrics"
 	kafkasink "github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/kafkasink"
-	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/redis"
+	redisadapter "github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/redis"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/timescaledb"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
+// Run запускает preprocessor-сервис согласно production-стилю.
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
+	// Инициализируем имя для метрик и трейсинга
 	serviceid.InitServiceName(cfg.ServiceName)
+
+	// Регистрируем доменные метрики
 	metrics.Register(nil)
 
-	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
-		Endpoint:        cfg.Telemetry.OTLPEndpoint,
-		ServiceName:     cfg.ServiceName,
-		ServiceVersion:  cfg.ServiceVersion,
-		Insecure:        cfg.Telemetry.Insecure,
-		SamplerRatio:    1.0,
-		ReconnectPeriod: 5 * time.Second,
-		Timeout:         5 * time.Second,
-	}, log)
+	// === Telemetry ===
+	cfg.Telemetry.ServiceName = cfg.ServiceName
+	cfg.Telemetry.ServiceVersion = cfg.ServiceVersion
+	cfg.Telemetry.ApplyDefaults()
+	if err := cfg.Telemetry.Validate(); err != nil {
+		return fmt.Errorf("telemetry config invalid: %w", err)
+	}
+	shutdownTracer, err := telemetry.InitTracer(ctx, cfg.Telemetry, log)
 	if err != nil {
 		return fmt.Errorf("init tracer: %w", err)
 	}
 	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
-	rstore, err := redis.NewRedisStorage(cfg.Redis, log)
+	// === Redis (PartialBarStorage) ===
+	cfg.Redis.ApplyDefaults()
+	if err := cfg.Redis.Validate(); err != nil {
+		return fmt.Errorf("redis config invalid: %w", err)
+	}
+	rcli, err := commonredis.New(cfg.Redis, log)
 	if err != nil {
-		return fmt.Errorf("redis: %w", err)
+		return fmt.Errorf("redis init: %w", err)
 	}
-	defer shutdownSafe(ctx, "redis", func(ctx context.Context) error {
-		return rstore.Close()
-	}, log)
+	defer shutdownSafe(ctx, "redis", func(ctx context.Context) error { return rcli.Close() }, log)
+	storage := redisadapter.NewAdapter(rcli)
 
-	if err := timescaledb.ApplyMigrations(cfg.Timescale.DSN, cfg.Timescale.MigrationsDir, log); err != nil {
-		return fmt.Errorf("apply migrations: %w", err)
+	// === TimescaleDB ===
+	if err := timescaledb.ApplyMigrations(cfg.Timescale, log); err != nil {
+		return fmt.Errorf("timescaledb migrations: %w", err)
 	}
-
-	timescale, err := timescaledb.NewTimescaleWriter(cfg.Timescale, log)
+	tsWriter, err := timescaledb.NewTimescaleWriter(cfg.Timescale, log)
 	if err != nil {
-		return fmt.Errorf("timescaledb: %w", err)
+		return fmt.Errorf("timescaledb init: %w", err)
 	}
-	defer timescale.Close()
+	defer shutdownSafe(ctx, "timescaledb", func(ctx context.Context) error { tsWriter.Close(); return nil }, log)
 
-	kprod, err := producer.New(ctx, producer.Config{
-		Brokers: cfg.Kafka.Brokers,
-		Backoff: cfg.Kafka.Backoff,
-	}, log)
+	// === Kafka Producer ===
+	cfg.KafkaProducer.ApplyDefaults()
+	if err := cfg.KafkaProducer.Validate(); err != nil {
+		return fmt.Errorf("kafka_producer config invalid: %w", err)
+	}
+	kprod, err := producer.New(ctx, cfg.KafkaProducer, log)
 	if err != nil {
-		return fmt.Errorf("kafka-producer: %w", err)
+		return fmt.Errorf("kafka producer init: %w", err)
 	}
-	defer shutdownSafe(ctx, "kafka-producer", func(ctx context.Context) error {
-		return kprod.Close()
-	}, log)
+	defer shutdownSafe(ctx, "kafka-producer", func(ctx context.Context) error { return kprod.Close() }, log)
 
-	kafkaSink := kafkasink.New(kprod, cfg.Kafka.OutputTopicPrefix, log)
-	flushSink := aggregator.NewMultiSink(timescale, kafkaSink)
+	// Sink для агрегированных свечей
+	kSink := kafkasink.New(kprod, cfg.OutputTopicPrefix, log)
+	flushSink := aggregator.NewMultiSink(tsWriter, kSink)
 
-	agg, err := aggregator.NewManager(cfg.Intervals, flushSink, rstore, log)
+	// === Aggregator ===
+	agg, err := aggregator.NewManager(cfg.Intervals, flushSink, storage, log)
 	if err != nil {
-		return fmt.Errorf("aggregator: %w", err)
+		return fmt.Errorf("aggregator init: %w", err)
 	}
-	defer agg.Close()
+	defer shutdownSafe(ctx, "aggregator", func(ctx context.Context) error { return agg.Close() }, log)
 
-	kc, err := consumer.New(ctx, consumer.Config{
-		Brokers: cfg.Kafka.Brokers,
-		GroupID: cfg.Kafka.GroupID,
-		Version: cfg.Kafka.Version,
-		Backoff: cfg.Kafka.Backoff,
-	}, log)
+	// === Kafka Consumer ===
+	cfg.KafkaConsumer.ApplyDefaults()
+	if err := cfg.KafkaConsumer.Validate(); err != nil {
+		return fmt.Errorf("kafka_consumer config invalid: %w", err)
+	}
+	kcons, err := consumer.New(ctx, cfg.KafkaConsumer, log)
 	if err != nil {
-		return fmt.Errorf("kafka-consumer: %w", err)
+		return fmt.Errorf("kafka consumer init: %w", err)
 	}
-	defer kc.Close()
+	defer shutdownSafe(ctx, "kafka-consumer", func(ctx context.Context) error { return kcons.Close() }, log)
 
-	consumer := kafka.New(kc, []string{cfg.Kafka.RawTopic}, agg.Process, log)
+	streamer := precons.New(kcons, []string{cfg.RawTopic}, agg.Process, log)
 
+	// === HTTP Server ===
+	cfg.HTTP.ApplyDefaults()
+	if err := cfg.HTTP.Validate(); err != nil {
+		return fmt.Errorf("http config invalid: %w", err)
+	}
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		if err := timescale.Ping(ctxPing); err != nil {
-			return fmt.Errorf("timescaledb not ready: %w", err)
-		}
-		return nil
+		return tsWriter.Ping(ctxPing)
 	}
-
-	httpSrv, err := httpserver.New(httpserver.Config{
-		Addr:            fmt.Sprintf(":%d", cfg.HTTP.Port),
-		ReadTimeout:     cfg.HTTP.ReadTimeout,
-		WriteTimeout:    cfg.HTTP.WriteTimeout,
-		IdleTimeout:     cfg.HTTP.IdleTimeout,
-		ShutdownTimeout: cfg.HTTP.ShutdownTimeout,
-		MetricsPath:     cfg.HTTP.MetricsPath,
-		HealthzPath:     cfg.HTTP.HealthzPath,
-		ReadyzPath:      cfg.HTTP.ReadyzPath,
-	}, readiness, log, nil)
+	httpSrv, err := httpserver.New(
+		cfg.HTTP,
+		readiness,
+		log,
+		nil,
+		httpserver.RecoverMiddleware,
+		httpserver.CORSMiddleware(),
+	)
 	if err != nil {
-		return fmt.Errorf("httpserver: %w", err)
+		return fmt.Errorf("httpserver init: %w", err)
 	}
 
-	log.WithContext(ctx).Info("preprocessor: components initialized, starting run loops")
+	// === Запуск ===
 	g, ctx := errgroup.WithContext(ctx)
-
 	g.Go(func() error { return httpSrv.Run(ctx) })
-	g.Go(func() error { return consumer.Run(ctx) })
+	g.Go(func() error { return streamer.Run(ctx) })
 
 	if err := g.Wait(); err != nil {
 		if ctx.Err() == context.Canceled {
-			log.WithContext(ctx).Info("preprocessor exited on context cancel")
+			log.WithContext(ctx).Info("preprocessor shut down cleanly")
 			return nil
 		}
-		log.WithContext(ctx).Error("preprocessor exited with error", zap.Error(err))
-		return err
+		return fmt.Errorf("preprocessor exited with error: %w", err)
 	}
 
-	log.WithContext(ctx).Info("preprocessor exited cleanly")
 	return nil
 }
 
+// shutdownSafe выполняет корректное завершение компонентов с логированием.
 func shutdownSafe(ctx context.Context, name string, fn func(context.Context) error, log *logger.Logger) {
 	log.WithContext(ctx).Info(name + ": shutting down")
 	if err := fn(ctx); err != nil {

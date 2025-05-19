@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator"
-
-	"github.com/golang-migrate/migrate/v4"
+	migr "github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,20 +23,37 @@ import (
 
 var tracer = otel.Tracer("preprocessor/storage/timescaledb")
 
-// Config описывает конфигурацию подключения к TimescaleDB.
-type Config struct {
-	DSN           string `mapstructure:"dsn"`
-	MigrationsDir string `mapstructure:"migrations_dir"`
+// ApplyMigrations применяет все миграции в директории.
+func ApplyMigrations(cfg Config, log *logger.Logger) error {
+	// Регистрируем имя сервиса для всех common-метрик/трейсов
+	serviceid.InitServiceName(cfg.MigrationsDir)
+
+	m, err := migr.New(
+		fmt.Sprintf("file://%s", cfg.MigrationsDir),
+		cfg.DSN,
+	)
+	if err != nil {
+		return fmt.Errorf("timescaledb: migrate init: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && err != migr.ErrNoChange {
+		return fmt.Errorf("timescaledb: migrate up: %w", err)
+	}
+
+	log.Info("timescaledb: migrations applied successfully")
+	return nil
 }
 
-// TimescaleWriter реализует FlushSink, вставляя свечи в TimescaleDB.
+// TimescaleWriter умеет писать свечи в БД.
 type TimescaleWriter struct {
 	db  *pgxpool.Pool
 	log *logger.Logger
 }
 
-// NewTimescaleWriter подключается к БД по конфигурации.
+// NewTimescaleWriter коннектится к TimescaleDB и пингует её.
 func NewTimescaleWriter(cfg Config, log *logger.Logger) (*TimescaleWriter, error) {
+	// Контекст для подключения
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -54,10 +71,13 @@ func NewTimescaleWriter(cfg Config, log *logger.Logger) (*TimescaleWriter, error
 		return nil, fmt.Errorf("timescaledb: ping failed: %w", err)
 	}
 
-	return &TimescaleWriter{db: db, log: log.Named("timescaledb")}, nil
+	return &TimescaleWriter{
+		db:  db,
+		log: log.Named("timescaledb"),
+	}, nil
 }
 
-// FlushCandle вставляет одну OHLCV свечу в таблицу candles.
+// FlushCandle вставляет или игнорирует дубликат.
 func (w *TimescaleWriter) FlushCandle(ctx context.Context, c *aggregator.Candle) error {
 	ctx, span := tracer.Start(ctx, "FlushCandle",
 		trace.WithAttributes(
@@ -83,37 +103,24 @@ func (w *TimescaleWriter) FlushCandle(ctx context.Context, c *aggregator.Candle)
 	)
 	if err != nil {
 		span.RecordError(err)
-		w.log.WithContext(ctx).Error("insert failed", zap.String("symbol", c.Symbol), zap.String("interval", c.Interval), zap.Error(err))
+		w.log.WithContext(ctx).
+			Error("timescaledb insert failed",
+				zap.String("symbol", c.Symbol),
+				zap.String("interval", c.Interval),
+				zap.Error(err))
 		return fmt.Errorf("timescaledb insert: %w", err)
 	}
 	return nil
 }
 
-// Ping проверяет доступность TimescaleDB.
+// Ping проверяет доступность БД.
 func (w *TimescaleWriter) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return w.db.Ping(ctx)
 }
 
-// Close завершает соединение с БД.
+// Close завершает пул соединений.
 func (w *TimescaleWriter) Close() {
 	w.db.Close()
-}
-
-func ApplyMigrations(dsn string, migrationsDir string, log *logger.Logger) error {
-	m, err := migrate.New(
-		fmt.Sprintf("file://%s", migrationsDir),
-		dsn,
-	)
-	if err != nil {
-		return fmt.Errorf("migrate init: %w", err)
-	}
-	defer m.Close()
-
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("migrate up: %w", err)
-	}
-	log.Info("migrations applied successfully")
-	return nil
 }

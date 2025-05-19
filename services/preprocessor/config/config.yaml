@@ -1,73 +1,79 @@
-# // github.com/YaganovValera/analytics-system/services/preprocessor/config/config.yaml
-
-
-# ------------------------------------------------------------------------------
-#  Preprocessor — основной конфигурационный файл
-# ------------------------------------------------------------------------------
+# services/preprocessor/config/config.yaml
 
 service_name:    "preprocessor"
 service_version: "v1.0.0"
 
-# ------------------------------------------------------------------------------
 # Kafka Consumer
-# ------------------------------------------------------------------------------
-kafka:
+kafka_consumer:
   brokers:
     - "kafka:9092"
   version: "2.8.0"
   group_id: "preprocessor"
-  raw_topic: "marketdata.raw"
-  output_topic_prefix: "candles"
   backoff:
     initial_interval: "1s"
-    max_interval: "30s"
+    max_interval:     "30s"
     max_elapsed_time: "5m"
 
-# ------------------------------------------------------------------------------
-# Redis (PartialBarStorage)
-# ------------------------------------------------------------------------------
-redis:
-  addr: "redis:6379"
-  password: ""
-  db: 0
+# Kafka Producer
+kafka_producer:
+  brokers:
+    - "kafka:9092"
+  required_acks:   "all"
+  timeout:         "15s"
+  compression:     "none"
+  flush_frequency: "0s"
+  flush_messages:  0
+  backoff:
+    initial_interval: "1s"
+    max_interval:     "30s"
+    max_elapsed_time: "5m"
 
-# ------------------------------------------------------------------------------
-# TimescaleDB (FlushSink)
-# ------------------------------------------------------------------------------
+# Application topics
+raw_topic: "marketdata.raw"
+output_topic_prefix: "candles"
+
+# Redis Configuration
+redis:
+  addr:         "redis:6379"
+  password:     ""
+  db:           0
+  service_name: "preprocessor"
+  backoff:
+    initial_interval: "1s"
+    max_interval:     "5s"
+    max_elapsed_time: "30s"
+
+# TimescaleDB Configuration
 timescaledb:
-  dsn: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
+  dsn:            "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"
   migrations_dir: "/app/migrations/timescaledb"
 
-# ------------------------------------------------------------------------------
 # OpenTelemetry
-# ------------------------------------------------------------------------------
 telemetry:
-  otel_endpoint: "otel-collector:4317"
-  insecure: true
+  endpoint:         "otel-collector:4317"
+  insecure:         true
+  reconnect_period: "5s"
+  timeout:          "5s"
+  sampler_ratio:    1.0
 
-# ------------------------------------------------------------------------------
 # Logging
-# ------------------------------------------------------------------------------
 logging:
-  level: "info"
+  level:    "info"
   dev_mode: false
+  format:   "console"
 
-# ------------------------------------------------------------------------------
-# HTTP Server (metrics + health)
-# ------------------------------------------------------------------------------
+# HTTP Server
 http:
-  port: 8081
-  read_timeout: "10s"
-  write_timeout: "15s"
-  idle_timeout: "60s"
-  shutdown_timeout: "5s"
-  metrics_path: "/metrics"
-  healthz_path: "/healthz"
-  readyz_path: "/readyz"
+  addr:              ":8081"
+  read_timeout:      "10s"
+  write_timeout:     "15s"
+  idle_timeout:      "60s"
+  shutdown_timeout:  "5s"
+  metrics_path:      "/metrics"
+  healthz_path:      "/healthz"
+  readyz_path:       "/readyz"
 
-# ------------------------------------------------------------------------------
-# Intervals (OHLCV)
-# ------------------------------------------------------------------------------
+# Aggregation Intervals
 intervals:
   - "1m"
   - "5m"
