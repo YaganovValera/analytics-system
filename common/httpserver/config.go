@@ -9,17 +9,17 @@ import (
 
 // Config определяет настройки HTTP-сервера.
 type Config struct {
-	Addr            string        // адрес для Listen, например ":8080"
-	ReadTimeout     time.Duration // максимальное время чтения запроса
-	WriteTimeout    time.Duration // максимальное время записи ответа
-	IdleTimeout     time.Duration // максимальное время простоя соединения
-	ShutdownTimeout time.Duration // таймаут для graceful shutdown
-	MetricsPath     string        // путь для /metrics
-	HealthzPath     string        // путь для /healthz
-	ReadyzPath      string        // путь для /readyz
+	Port            int           `mapstructure:"port"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout     time.Duration `mapstructure:"idle_timeout"`
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	MetricsPath     string        `mapstructure:"metrics_path"`
+	HealthzPath     string        `mapstructure:"healthz_path"`
+	ReadyzPath      string        `mapstructure:"readyz_path"`
 }
 
-func (c *Config) applyDefaults() {
+func (c *Config) ApplyDefaults() {
 	if c.ReadTimeout <= 0 {
 		c.ReadTimeout = 10 * time.Second
 	}
@@ -43,9 +43,9 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-func (c Config) validate() error {
-	if c.Addr == "" {
-		return fmt.Errorf("httpserver: Addr is required")
+func (c Config) Validate() error {
+	if c.Port <= 0 || c.Port > 65535 {
+		return fmt.Errorf("httpserver: port must be valid")
 	}
 	return nil
 }

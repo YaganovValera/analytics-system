@@ -73,37 +73,6 @@ var consumerMetrics = struct {
 var tracer = otel.Tracer("kafka-consumer")
 
 // -----------------------------------------------------------------------------
-// Configuration
-// -----------------------------------------------------------------------------
-
-// Config содержит параметры для Kafka ConsumerGroup.
-//
-// Brokers — адреса брокеров.
-// GroupID — идентификатор consumer group.
-// Version — строка версии Kafka (например, "2.8.0").
-// Backoff — стратегия ретраев при подключении и сбоях сессий.
-type Config struct {
-	Brokers []string
-	GroupID string
-	Version string
-	Backoff backoff.Config
-}
-
-// validate проверяет обязательные поля.
-func (c Config) validate() error {
-	if len(c.Brokers) == 0 {
-		return fmt.Errorf("kafka consumer: brokers required")
-	}
-	if c.GroupID == "" {
-		return fmt.Errorf("kafka consumer: GroupID required")
-	}
-	if c.Version == "" {
-		return fmt.Errorf("kafka consumer: Version required")
-	}
-	return nil
-}
-
-// -----------------------------------------------------------------------------
 // Consumer implementation
 // -----------------------------------------------------------------------------
 
@@ -115,9 +84,6 @@ type kafkaConsumerGroup struct {
 
 // New создаёт и подключает ConsumerGroup с ретраями.
 func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Consumer, error) {
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
 	log = log.Named("kafka-consumer")
 
 	version, err := sarama.ParseKafkaVersion(cfg.Version)

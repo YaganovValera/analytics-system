@@ -34,11 +34,6 @@ func New(
 	extra map[string]http.Handler,
 	middlewares ...Middleware,
 ) (HTTPServer, error) {
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
 	mux := http.NewServeMux()
 
 	// /metrics
@@ -74,7 +69,7 @@ func New(
 	}
 
 	srv := &http.Server{
-		Addr:         cfg.Addr,
+		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,

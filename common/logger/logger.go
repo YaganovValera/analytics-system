@@ -7,44 +7,14 @@ import (
 
 	"github.com/YaganovValera/analytics-system/common/ctxkeys"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
-
-type Config struct {
-	Level   string
-	DevMode bool
-	Format  string // "console" | "json"
-}
-
-func (c *Config) applyDefaults() {
-	if c.Level == "" {
-		c.Level = "info"
-	}
-	if c.Format == "" {
-		c.Format = "console"
-	}
-}
-
-func (c Config) validate() error {
-	var lvl zapcore.Level
-	if err := lvl.UnmarshalText([]byte(c.Level)); err != nil {
-		return fmt.Errorf("logger: invalid level %q: %w", c.Level, err)
-	}
-	return nil
-}
 
 type Logger struct {
 	raw *zap.Logger
 }
 
 func New(cfg Config) (*Logger, error) {
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
 	zapCfg := buildZapConfig(cfg.DevMode, cfg.Format)
-
 	if err := setZapLevel(&zapCfg, cfg.Level); err != nil {
 		return nil, err
 	}

@@ -3,7 +3,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -17,53 +16,10 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 )
 
-// Config содержит параметры для инициализации OpenTelemetry.
-type Config struct {
-	Endpoint        string        // OTLP-collector "host:port"
-	ServiceName     string        // имя сервиса
-	ServiceVersion  string        // версия сборки
-	Insecure        bool          // true → gRPC без TLS
-	ReconnectPeriod time.Duration // период ребута экспортёра
-	Timeout         time.Duration // таймаут Init/Shutdown
-	SamplerRatio    float64       // 0.0…1.0 — доля выборки span'ов
-}
-
 var tracerProvider *sdktrace.TracerProvider
-
-func applyDefaults(cfg *Config) {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Second
-	}
-	if cfg.ReconnectPeriod <= 0 {
-		cfg.ReconnectPeriod = 5 * time.Second
-	}
-	if cfg.SamplerRatio < 0 || cfg.SamplerRatio > 1 {
-		cfg.SamplerRatio = 1
-	}
-}
-
-func validateConfig(cfg Config) error {
-	switch {
-	case cfg.Endpoint == "":
-		return fmt.Errorf("telemetry: endpoint is required")
-	case cfg.ServiceName == "":
-		return fmt.Errorf("telemetry: service name is required")
-	case cfg.ServiceVersion == "":
-		return fmt.Errorf("telemetry: service version is required")
-	case cfg.SamplerRatio < 0 || cfg.SamplerRatio > 1:
-		return fmt.Errorf("telemetry: sampler ratio must be between 0.0 and 1.0, got %v", cfg.SamplerRatio)
-	default:
-		return nil
-	}
-}
 
 // InitTracer инициализирует глобальный TracerProvider и возвращает Shutdown-функцию.
 func InitTracer(ctx context.Context, cfg Config, log *logger.Logger) (func(context.Context) error, error) {
-	applyDefaults(&cfg)
-	if err := validateConfig(cfg); err != nil {
-		return nil, err
-	}
-
 	initCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 

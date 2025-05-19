@@ -107,44 +107,6 @@ var producerMetrics = struct {
 var tracer = otel.Tracer("kafka-producer")
 
 // -----------------------------------------------------------------------------
-// Configuration
-// -----------------------------------------------------------------------------
-
-// Config groups all tunables for a Kafka Sync-producer.
-//
-// Zero values are replaced with sane defaults by applyDefaults().
-type Config struct {
-	Brokers        []string
-	RequiredAcks   string
-	Timeout        time.Duration
-	Compression    string
-	FlushFrequency time.Duration
-	FlushMessages  int
-	Backoff        backoff.Config
-}
-
-// applyDefaults заполняет zero-полям безопасные дефолты.
-func (c *Config) applyDefaults() {
-	if c.Timeout <= 0 {
-		c.Timeout = 5 * time.Second
-	}
-	if c.RequiredAcks == "" {
-		c.RequiredAcks = "all"
-	}
-	if c.Compression == "" {
-		c.Compression = "none"
-	}
-}
-
-// validate выполняет быстрые sanity-checks.
-func (c Config) validate() error {
-	if len(c.Brokers) == 0 {
-		return fmt.Errorf("kafka producer: brokers required")
-	}
-	return nil
-}
-
-// -----------------------------------------------------------------------------
 // Private helpers
 // -----------------------------------------------------------------------------
 
@@ -210,10 +172,6 @@ type kafkaProducer struct {
 
 // New создает SyncProducer c ретраями подключения.
 func New(ctx context.Context, cfg Config, log *logger.Logger) (commonkafka.Producer, error) {
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
 	log = log.Named("kafka-producer")
 
 	// Sarama config

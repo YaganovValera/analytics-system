@@ -62,43 +62,6 @@ func SetServiceLabel(name string) {
 	serviceLabel = name
 }
 
-type Config struct {
-	InitialInterval     time.Duration
-	RandomizationFactor float64
-	Multiplier          float64
-	MaxInterval         time.Duration
-	MaxElapsedTime      time.Duration
-	PerAttemptTimeout   time.Duration
-}
-
-func (c *Config) applyDefaults() {
-	if c.InitialInterval <= 0 {
-		c.InitialInterval = time.Second
-	}
-	if c.RandomizationFactor <= 0 {
-		c.RandomizationFactor = 0.5
-	}
-	if c.Multiplier <= 0 {
-		c.Multiplier = 2.0
-	}
-	if c.MaxInterval <= 0 {
-		c.MaxInterval = 30 * time.Second
-	}
-}
-
-func (c Config) validate() error {
-	if c.RandomizationFactor < 0 || c.RandomizationFactor > 1 {
-		return fmt.Errorf("backoff: RandomizationFactor must be in [0,1]")
-	}
-	if c.Multiplier < 1 {
-		return fmt.Errorf("backoff: Multiplier must be ≥ 1")
-	}
-	if c.PerAttemptTimeout < 0 {
-		return fmt.Errorf("backoff: PerAttemptTimeout must be ≥ 0")
-	}
-	return nil
-}
-
 type RetryableFunc func(ctx context.Context) error
 
 // NotifyFunc используется для уведомлений о попытках
@@ -119,11 +82,6 @@ func Permanent(err error) error        { return cbackoff.Permanent(err) }
 // Execute выполняет fn с exponential backoff и метриками.
 // Не логирует ошибки напрямую — логика выносится в notify.
 func Execute(ctx context.Context, cfg Config, fn RetryableFunc, notify NotifyFunc) error {
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return fmt.Errorf("backoff: invalid config: %w", err)
-	}
-
 	bo := cbackoff.NewExponentialBackOff()
 	bo.InitialInterval = cfg.InitialInterval
 	bo.RandomizationFactor = cfg.RandomizationFactor
