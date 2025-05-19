@@ -4,10 +4,12 @@ go 1.23.0
 
 require (
 	github.com/IBM/sarama v1.45.1
+	github.com/YaganovValera/analytics-system/proto v0.0.0-20250518180945-ac7ad7e9b4e2
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/dnwe/otelsarama v0.0.0-20240308230250-9388d9d40bc0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_golang v1.22.0
+	github.com/redis/go-redis/v9 v9.8.0
 	github.com/spf13/viper v1.20.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0
 	go.opentelemetry.io/otel v1.35.0
@@ -17,7 +19,10 @@ require (
 	go.uber.org/zap v1.27.0
 )
 
-require github.com/felixge/httpsnoop v1.0.4 // indirect
+require (
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -68,7 +73,7 @@ require (
 	golang.org/x/text v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
-	google.golang.org/grpc v1.71.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/grpc v1.71.1 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

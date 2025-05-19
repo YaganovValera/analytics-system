@@ -1,3 +1,5 @@
+// common/httpserver/server.go
+
 package httpserver
 
 import (
@@ -7,74 +9,24 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
-
-	"github.com/YaganovValera/analytics-system/common/logger"
 )
 
-// ReadyChecker returns nil if the service is ready to serve.
+// ReadyChecker вызывается при запросе /readyz и должен вернуть nil, если готовы зависимости.
 type ReadyChecker func() error
 
-// HTTPServer defines Run(context) error.
+// HTTPServer умеет стартовать сервер.
 type HTTPServer interface {
 	Run(ctx context.Context) error
 }
 
-// Middleware allows chaining HTTP handlers.
+// Middleware позволяет оборачивать HTTP-хендлеры.
 type Middleware func(http.Handler) http.Handler
 
-// Config defines timeouts and paths for the HTTP server.
-type Config struct {
-	Addr            string
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
-	MetricsPath     string
-	HealthzPath     string
-	ReadyzPath      string
-}
-
-func (c *Config) applyDefaults() {
-	if c.ReadTimeout <= 0 {
-		c.ReadTimeout = 10 * time.Second
-	}
-	if c.WriteTimeout <= 0 {
-		c.WriteTimeout = 15 * time.Second
-	}
-	if c.IdleTimeout <= 0 {
-		c.IdleTimeout = 60 * time.Second
-	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = 5 * time.Second
-	}
-	if c.MetricsPath == "" {
-		c.MetricsPath = "/metrics"
-	}
-	if c.HealthzPath == "" {
-		c.HealthzPath = "/healthz"
-	}
-	if c.ReadyzPath == "" {
-		c.ReadyzPath = "/readyz"
-	}
-}
-
-func (c Config) validate() error {
-	if c.Addr == "" {
-		return fmt.Errorf("httpserver: Addr is required")
-	}
-	return nil
-}
-
-type server struct {
-	httpServer      *http.Server
-	shutdownTimeout time.Duration
-	log             *logger.Logger
-}
-
-// New constructs an HTTPServer with metrics and health endpoints, plus extra routes.
+// New создаёт HTTPServer с метриками, healthz и readyz эндпоинтами.
 func New(
 	cfg Config,
 	check ReadyChecker,
@@ -89,11 +41,16 @@ func New(
 
 	mux := http.NewServeMux()
 
+	// /metrics
 	mux.Handle(cfg.MetricsPath, otelhttp.NewHandler(promhttp.Handler(), "metrics"))
+
+	// /healthz
 	mux.HandleFunc(cfg.HealthzPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
+
+	// /readyz
 	mux.HandleFunc(cfg.ReadyzPath, func(w http.ResponseWriter, _ *http.Request) {
 		if err := check(); err != nil {
 			log.Warn("http: readyz check failed", zap.Error(err))
@@ -105,16 +62,18 @@ func New(
 		_, _ = w.Write([]byte("READY"))
 	})
 
+	// доп. маршруты
 	for path, handler := range extra {
 		mux.Handle(path, otelhttp.NewHandler(handler, path))
 	}
 
+	// middleware
 	handler := http.Handler(mux)
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		handler = middlewares[i](handler)
 	}
 
-	httpSrv := &http.Server{
+	srv := &http.Server{
 		Addr:         cfg.Addr,
 		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
@@ -126,16 +85,23 @@ func New(
 	}
 
 	return &server{
-		httpServer:      httpSrv,
+		httpServer:      srv,
 		shutdownTimeout: cfg.ShutdownTimeout,
 		log:             log.Named("http-server"),
 	}, nil
 }
 
-// Run starts the server and shuts down gracefully on context cancellation.
+type server struct {
+	httpServer      *http.Server
+	shutdownTimeout time.Duration
+	log             *logger.Logger
+}
+
+// Run запускает HTTP-сервер и корректно его завершает по отмене ctx.
 func (s *server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
+	// используем внешний ctx для всего сервера
 	s.httpServer.BaseContext = func(_ net.Listener) context.Context {
 		return ctx
 	}
@@ -160,6 +126,7 @@ func (s *server) Run(ctx context.Context) error {
 		}
 	}
 
+	// graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
 
