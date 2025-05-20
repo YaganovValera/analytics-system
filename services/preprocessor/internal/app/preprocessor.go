@@ -39,10 +39,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	// === Telemetry ===
 	cfg.Telemetry.ServiceName = cfg.ServiceName
 	cfg.Telemetry.ServiceVersion = cfg.ServiceVersion
-	cfg.Telemetry.ApplyDefaults()
-	if err := cfg.Telemetry.Validate(); err != nil {
-		return fmt.Errorf("telemetry config invalid: %w", err)
-	}
 	shutdownTracer, err := telemetry.InitTracer(ctx, cfg.Telemetry, log)
 	if err != nil {
 		return fmt.Errorf("init tracer: %w", err)
@@ -50,10 +46,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
 	// === Redis (PartialBarStorage) ===
-	cfg.Redis.ApplyDefaults()
-	if err := cfg.Redis.Validate(); err != nil {
-		return fmt.Errorf("redis config invalid: %w", err)
-	}
 	rcli, err := commonredis.New(cfg.Redis, log)
 	if err != nil {
 		return fmt.Errorf("redis init: %w", err)
@@ -72,10 +64,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	defer shutdownSafe(ctx, "timescaledb", func(ctx context.Context) error { tsWriter.Close(); return nil }, log)
 
 	// === Kafka Producer ===
-	cfg.KafkaProducer.ApplyDefaults()
-	if err := cfg.KafkaProducer.Validate(); err != nil {
-		return fmt.Errorf("kafka_producer config invalid: %w", err)
-	}
 	kprod, err := producer.New(ctx, cfg.KafkaProducer, log)
 	if err != nil {
 		return fmt.Errorf("kafka producer init: %w", err)
@@ -94,10 +82,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	defer shutdownSafe(ctx, "aggregator", func(ctx context.Context) error { return agg.Close() }, log)
 
 	// === Kafka Consumer ===
-	cfg.KafkaConsumer.ApplyDefaults()
-	if err := cfg.KafkaConsumer.Validate(); err != nil {
-		return fmt.Errorf("kafka_consumer config invalid: %w", err)
-	}
 	kcons, err := consumer.New(ctx, cfg.KafkaConsumer, log)
 	if err != nil {
 		return fmt.Errorf("kafka consumer init: %w", err)
@@ -107,10 +91,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	streamer := precons.New(kcons, []string{cfg.RawTopic}, agg.Process, log)
 
 	// === HTTP Server ===
-	cfg.HTTP.ApplyDefaults()
-	if err := cfg.HTTP.Validate(); err != nil {
-		return fmt.Errorf("http config invalid: %w", err)
-	}
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()

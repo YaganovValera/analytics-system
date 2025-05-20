@@ -7,12 +7,12 @@ import (
 )
 
 type Config struct {
-	InitialInterval     time.Duration
-	RandomizationFactor float64
-	Multiplier          float64
-	MaxInterval         time.Duration
-	MaxElapsedTime      time.Duration
-	PerAttemptTimeout   time.Duration
+	InitialInterval     time.Duration `mapstructure:"initial_interval"`
+	RandomizationFactor float64       `mapstructure:"randomization_factor"`
+	Multiplier          float64       `mapstructure:"multiplier"`
+	MaxInterval         time.Duration `mapstructure:"max_interval"`
+	MaxElapsedTime      time.Duration `mapstructure:"max_elapsed_time"`
+	PerAttemptTimeout   time.Duration `mapstructure:"per_attempt_timeout"`
 }
 
 func (c *Config) ApplyDefaults() {

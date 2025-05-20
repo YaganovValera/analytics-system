@@ -8,10 +8,10 @@ import (
 )
 
 type Config struct {
-	Brokers []string
-	GroupID string
-	Version string
-	Backoff backoff.Config
+	Brokers []string       `mapstructure:"brokers"`
+	GroupID string         `mapstructure:"group_id"`
+	Version string         `mapstructure:"version"`
+	Backoff backoff.Config `mapstructure:"backoff"`
 }
 
 func (c *Config) ApplyDefaults() {

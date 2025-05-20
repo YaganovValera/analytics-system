@@ -10,12 +10,12 @@ import (
 
 // Config holds WebSocket configuration for Binance connector.
 type Config struct {
-	URL              string
-	Streams          []string
-	BufferSize       int
-	ReadTimeout      time.Duration
-	SubscribeTimeout time.Duration
-	BackoffConfig    backoff.Config
+	URL              string         `mapstructure:"ws_url"`
+	Streams          []string       `mapstructure:"streams"`
+	BufferSize       int            `mapstructure:"buffer_size"`
+	ReadTimeout      time.Duration  `mapstructure:"read_timeout"`
+	SubscribeTimeout time.Duration  `mapstructure:"subscribe_timeout"`
+	BackoffConfig    backoff.Config `mapstructure:"backoff"`
 }
 
 // ApplyDefaults applies fallback defaults if values are unset.

@@ -41,7 +41,6 @@ func New(
 
 	// /healthz
 	mux.HandleFunc(cfg.HealthzPath, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
 
@@ -49,11 +48,9 @@ func New(
 	mux.HandleFunc(cfg.ReadyzPath, func(w http.ResponseWriter, _ *http.Request) {
 		if err := check(); err != nil {
 			log.Warn("http: readyz check failed", zap.Error(err))
-			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(fmt.Sprintf("NOT READY: %v", err)))
 			return
 		}
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("READY"))
 	})
 

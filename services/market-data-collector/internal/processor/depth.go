@@ -128,7 +128,9 @@ func (dp *depthProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	}
 
 	start := time.Now()
-	err = dp.producer.Publish(ctx, dp.topic, nil, bytes)
+	key := []byte(evt.Symbol)
+	err = dp.producer.Publish(ctx, dp.topic, key, bytes)
+
 	if err != nil {
 		metrics.PublishErrors.Inc()
 		dp.log.WithContext(ctx).Error("publish depth failed",

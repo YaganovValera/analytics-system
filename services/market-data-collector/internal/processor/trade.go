@@ -122,7 +122,9 @@ func (tp *tradeProcessor) Process(ctx context.Context, raw binance.RawMessage) e
 	}
 
 	start := time.Now()
-	err = tp.producer.Publish(ctx, tp.topic, nil, bytes)
+	key := []byte(evt.Symbol)
+	err = tp.producer.Publish(ctx, tp.topic, key, bytes)
+
 	if err != nil {
 		metrics.PublishErrors.Inc()
 		tp.log.WithContext(ctx).Error("publish trade failed",

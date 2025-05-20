@@ -17,6 +17,10 @@ var (
 
 func RegisterMetrics(r prometheus.Registerer) {
 	once.Do(func() {
+		if r == nil {
+			r = prometheus.DefaultRegisterer
+		}
+
 		wsConnects = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "collector", Subsystem: "binance", Name: "connects_total",
 			Help: "Total WebSocket connection attempts",
@@ -39,7 +43,12 @@ func RegisterMetrics(r prometheus.Registerer) {
 
 		collectors := []prometheus.Collector{wsConnects, wsErrors, wsMessages, wsBufferDrops}
 		for _, c := range collectors {
-			_ = r.Register(c)
+			if err := r.Register(c); err != nil {
+				// игнорируем попытку повторной регистрации
+				if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+					panic(err)
+				}
+			}
 		}
 	})
 }

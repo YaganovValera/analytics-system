@@ -77,8 +77,13 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return db.Ping(ctxPing)
 	}
 
-	httpSrv, err := httpserver.New(cfg.HTTP, readiness, log,
-		nil, httpserver.RecoverMiddleware, httpserver.CORSMiddleware())
+	httpSrv, err := httpserver.New(
+		cfg.HTTP,
+		readiness,
+		log,
+		nil,
+		httpserver.RecoverMiddleware,
+		httpserver.CORSMiddleware())
 	if err != nil {
 		return fmt.Errorf("httpserver init: %w", err)
 	}

@@ -14,10 +14,8 @@ import (
 	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
 
-	// pkg/binance — здесь лежит Config и NewConnector
-	pkgBinance "github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
-	// internal/transport/binance — только для StreamWithMetrics и метрик
 	transportBinance "github.com/YaganovValera/analytics-system/services/market-data-collector/internal/transport/binance"
+	pkgBinance "github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance"
 
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/config"
 	"github.com/YaganovValera/analytics-system/services/market-data-collector/internal/metrics"
@@ -32,7 +30,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	metrics.Register(nil)
 	transportBinance.RegisterMetrics(nil)
 
-	// Инициализируем трассировку
+	// === Telemetry ===
 	cfg.Telemetry.ServiceName = cfg.ServiceName
 	cfg.Telemetry.ServiceVersion = cfg.ServiceVersion
 	shutdownTracer, err := telemetry.InitTracer(ctx, cfg.Telemetry, log)
@@ -41,7 +39,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer shutdownSafe(ctx, "telemetry", func() error { return shutdownTracer(ctx) }, log)
 
-	// 1) Создаём pkg/binance connector с правильным Config
+	// === Binance Connector
 	binanceCfg := pkgBinance.Config{
 		URL:              cfg.Binance.URL,
 		Streams:          cfg.Binance.Streams,
@@ -56,7 +54,13 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer shutdownSafe(ctx, "ws-connector", wsConn.Close, log)
 
-	// 2) Kafka Producer
+	wsManager := transportBinance.NewWSManager(wsConn)
+	defer shutdownSafe(ctx, "ws-manager", func() error {
+		wsManager.Stop()
+		return nil
+	}, log)
+
+	// === Kafka Producer
 	kafkaProd, err := producer.New(ctx, producer.Config{
 		Brokers:        cfg.Kafka.Brokers,
 		RequiredAcks:   cfg.Kafka.RequiredAcks,
@@ -71,22 +75,14 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 	defer shutdownSafe(ctx, "kafka-producer", kafkaProd.Close, log)
 
+	// === Processors
 	tradeProc := processor.NewTradeProcessor(kafkaProd, cfg.Kafka.RawTopic, log)
 	depthProc := processor.NewDepthProcessor(kafkaProd, cfg.Kafka.OrderBookTopic, log)
 
-	// HTTP-сервер
+	// === HTTP Server
 	readiness := func() error { return kafkaProd.Ping(ctx) }
 	httpSrv, err := httpserver.New(
-		httpserver.Config{
-			Port:            cfg.HTTP.Port,
-			ReadTimeout:     cfg.HTTP.ReadTimeout,
-			WriteTimeout:    cfg.HTTP.WriteTimeout,
-			IdleTimeout:     cfg.HTTP.IdleTimeout,
-			ShutdownTimeout: cfg.HTTP.ShutdownTimeout,
-			MetricsPath:     cfg.HTTP.MetricsPath,
-			HealthzPath:     cfg.HTTP.HealthzPath,
-			ReadyzPath:      cfg.HTTP.ReadyzPath,
-		},
+		cfg.HTTP,
 		readiness,
 		log,
 		nil,
@@ -98,46 +94,54 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	// HTTP
+
+	// HTTP server
 	g.Go(func() error { return httpSrv.Run(ctx) })
 
-	// Основной WS→Kafka цикл
+	// WebSocket loop
 	g.Go(func() error {
 		for {
 			if ctx.Err() != nil {
+				wsManager.Stop()
 				return ctx.Err()
 			}
 
-			// 3) Подключаемся через backoff и StreamWithMetrics
 			var msgCh <-chan pkgBinance.RawMessage
-			if err := backoff.Execute(ctx, cfg.Binance.BackoffConfig,
+			var cancel context.CancelFunc
+
+			err := backoff.Execute(ctx, cfg.Binance.BackoffConfig,
 				func(ctx context.Context) error {
-					ch, e := transportBinance.StreamWithMetrics(ctx, wsConn)
-					if e == nil {
+					ch, cancelFn, err := wsManager.Start(ctx)
+					if err == nil {
 						msgCh = ch
+						cancel = cancelFn
 					}
-					return e
+					return err
 				},
-				func(ctx context.Context, e error, delay time.Duration, attempt int) {
+				func(ctx context.Context, err error, delay time.Duration, attempt int) {
 					log.WithContext(ctx).Warn("ws reconnect retry",
-						zap.Error(e),
+						zap.Error(err),
 						zap.Duration("delay", delay),
 						zap.Int("attempt", attempt),
 					)
 				},
-			); err != nil {
+			)
+			if err != nil {
+				wsManager.Stop()
 				return fmt.Errorf("ws connect failed: %w", err)
 			}
 
-			// 4) Обработка через dispatcher (trade + depth)
-			if err := processor.DispatchStream(ctx, msgCh, tradeProc, log.Sugar().Desugar()); err != nil {
-				log.WithContext(ctx).Error("dispatch trade", zap.Error(err))
-			}
-			if err := processor.DispatchStream(ctx, msgCh, depthProc, log.Sugar().Desugar()); err != nil {
-				log.WithContext(ctx).Error("dispatch depth", zap.Error(err))
+			router := processor.NewRouter(log.Named("processor"))
+			router.Register("trade", tradeProc)
+			router.Register("depthUpdate", depthProc)
+
+			if err := router.Run(ctx, msgCh); err != nil {
+				log.WithContext(ctx).Error("router exited", zap.Error(err))
 			}
 
-			// loop continues on channel close
+			if cancel != nil {
+				cancel()
+			}
 		}
 	})
 
@@ -151,7 +155,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	return nil
 }
 
-// shutdownSafe оборачивает вызов Close()/Shutdown() с логированием
 func shutdownSafe(ctx context.Context, name string, fn func() error, log *logger.Logger) {
 	log.WithContext(ctx).Info(fmt.Sprintf("%s: shutting down", name))
 	if err := fn(); err != nil {

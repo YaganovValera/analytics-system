@@ -102,7 +102,7 @@ func Load(path string) (*Config, error) {
 			"logging.format":   "console",
 
 			// HTTP server
-			"http.addr":             ":8081",
+			"http.port":             8081,
 			"http.read_timeout":     "10s",
 			"http.write_timeout":    "15s",
 			"http.idle_timeout":     "60s",

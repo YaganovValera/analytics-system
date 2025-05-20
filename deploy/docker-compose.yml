@@ -157,6 +157,7 @@ services:
       PREPROCESSOR_SERVICE_NAME: preprocessor
       PREPROCESSOR_SERVICE_VERSION: "v1.0.0"
       PREPROCESSOR_KAFKA_BROKERS: kafka:9092
+      PREPROCESSOR_KAFKA_CONSUMER_GROUP_ID: preprocessor
       PREPROCESSOR_TIMESCALEDB_DSN: postgres://user:pass@timescaledb:5432/analytics?sslmode=disable
       PREPROCESSOR_TIMESCALEDB_MIGRATIONS_DIR: /app/migrations/timescaledb
       PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
@@ -189,12 +190,14 @@ services:
       ANALYTICS_KAFKA_BROKERS: kafka:9092
       ANALYTICS_KAFKA_GROUP_ID: analytics-api
       ANALYTICS_KAFKA_VERSION: "2.8.0"
-      ANALYTICS_KAFKA_TOPIC_PREFIX: candles
+      
+      ANALYTICS_TOPIC_BASE: candles
 
       ANALYTICS_TIMESCALEDB_DSN: postgres://user:pass@timescaledb:5432/analytics?sslmode=disable
 
       ANALYTICS_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
       ANALYTICS_TELEMETRY_INSECURE: "true"
+      ANALYTICS_TELEMETRY_SERVICE_NAME: analytics-api
 
       OTEL_SERVICE_NAME: analytics-api
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317

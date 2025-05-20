@@ -67,7 +67,7 @@ logging:
 
 # HTTP Server
 http:
-  addr:              ":8081"
+  port:              8081
   read_timeout:      "10s"
   write_timeout:     "15s"
   idle_timeout:      "60s"

@@ -12,8 +12,8 @@ type Config struct {
 	ReconnectPeriod time.Duration `mapstructure:"reconnect_period"`
 	Timeout         time.Duration `mapstructure:"timeout"`
 	SamplerRatio    float64       `mapstructure:"sampler_ratio"`
-	ServiceName     string        `mapstructure:"-"`
-	ServiceVersion  string        `mapstructure:"-"`
+	ServiceName     string        `mapstructure:"service_name"`
+	ServiceVersion  string        `mapstructure:"service_version"`
 }
 
 func (c *Config) ApplyDefaults() {
