@@ -53,8 +53,10 @@ func Load(path string) (*Config, error) {
 			"http.readyz_path":      "/readyz",
 
 			// Telemetry
-			"telemetry.endpoint": "otel-collector:4317",
-			"telemetry.insecure": false,
+			"telemetry.endpoint":        "otel-collector:4317",
+			"telemetry.insecure":        false,
+			"telemetry.service_name":    "market-data-collector",
+			"telemetry.service_version": "v1.0.0",
 
 			// Kafka
 			"kafka.required_acks":   "all",

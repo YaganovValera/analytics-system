@@ -8,8 +8,10 @@ logging:
   dev_mode: false
 
 telemetry:
-  otel_endpoint: "otel-collector:4317"
+  endpoint: "otel-collector:4317"
   insecure: true
+  service_name:    "analytics-api"
+  service_version: "v1.0.0"
 
 http:
   port: 8082
@@ -29,8 +31,9 @@ kafka:
     - "kafka:9092"
   group_id: "analytics-api"
   version: "2.8.0"
-  topic_prefix: "candles"
   backoff:
     initial_interval: "1s"
     max_interval: "30s"
     max_elapsed_time: "5m"
+  
+topic_prefix: "candles"

@@ -93,6 +93,8 @@ func Load(path string) (*Config, error) {
 			"telemetry.reconnect_period": "5s",
 			"telemetry.timeout":          "5s",
 			"telemetry.sampler_ratio":    1.0,
+			"telemetry.service_name":     "preprocessor",
+			"telemetry.service_version":  "v1.0.0",
 
 			// Logging
 			"logging.level":    "info",

@@ -55,6 +55,9 @@ telemetry:
   reconnect_period: "5s"
   timeout:          "5s"
   sampler_ratio:    1.0
+  service_name:    "preprocessor"
+  service_version: "v1.0.0"
+
 
 # Logging
 logging:

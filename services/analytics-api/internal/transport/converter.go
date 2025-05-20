@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/transport/marshaler.go
+// internal/transport/converter.go
 package transport
 
 import (

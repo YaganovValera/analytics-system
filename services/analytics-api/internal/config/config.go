@@ -2,74 +2,58 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
-	"time"
 
-	"github.com/YaganovValera/analytics-system/common/backoff"
-	"github.com/YaganovValera/analytics-system/common/config"
+	commoncfg "github.com/YaganovValera/analytics-system/common/config"
+	commonhttp "github.com/YaganovValera/analytics-system/common/httpserver"
+	consumercfg "github.com/YaganovValera/analytics-system/common/kafka/consumer"
+	commonlogger "github.com/YaganovValera/analytics-system/common/logger"
+	commontelemetry "github.com/YaganovValera/analytics-system/common/telemetry"
+	timescale "github.com/YaganovValera/analytics-system/services/analytics-api/internal/storage/timescaledb"
 )
 
 type Config struct {
-	ServiceName    string          `mapstructure:"service_name"`
-	ServiceVersion string          `mapstructure:"service_version"`
-	Logging        Logging         `mapstructure:"logging"`
-	Telemetry      Telemetry       `mapstructure:"telemetry"`
-	HTTP           HTTPConfig      `mapstructure:"http"`
-	Timescale      TimescaleConfig `mapstructure:"timescaledb"`
-	Kafka          KafkaConfig     `mapstructure:"kafka"`
+	ServiceName    string `mapstructure:"service_name"`
+	ServiceVersion string `mapstructure:"service_version"`
+
+	Logging   commonlogger.Config    `mapstructure:"logging"`
+	Telemetry commontelemetry.Config `mapstructure:"telemetry"`
+	HTTP      commonhttp.Config      `mapstructure:"http"`
+
+	Kafka     consumercfg.Config `mapstructure:"kafka"`
+	TopicBase string             `mapstructure:"topic_base"`
+
+	Timescale timescale.Config `mapstructure:"timescaledb"`
 }
 
-type Logging struct {
-	Level   string `mapstructure:"level"`
-	DevMode bool   `mapstructure:"dev_mode"`
-}
-
-type Telemetry struct {
-	OTLPEndpoint string `mapstructure:"otel_endpoint"`
-	Insecure     bool   `mapstructure:"insecure"`
-}
-
-type HTTPConfig struct {
-	Port            int           `mapstructure:"port"`
-	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
-	IdleTimeout     time.Duration `mapstructure:"idle_timeout"`
-	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
-	MetricsPath     string        `mapstructure:"metrics_path"`
-	HealthzPath     string        `mapstructure:"healthz_path"`
-	ReadyzPath      string        `mapstructure:"readyz_path"`
-}
-
-type TimescaleConfig struct {
-	DSN string `mapstructure:"dsn"`
-}
-
-type KafkaConfig struct {
-	Brokers     []string       `mapstructure:"brokers"`
-	GroupID     string         `mapstructure:"group_id"`
-	Version     string         `mapstructure:"version"`
-	TopicPrefix string         `mapstructure:"topic_prefix"`
-	Backoff     backoff.Config `mapstructure:"backoff"`
-}
-
+// Load читает конфигурацию из YAML и/или окружения.
 func Load(path string) (*Config, error) {
 	var cfg Config
-	err := config.Load(config.Options{
+
+	if err := commoncfg.Load(commoncfg.Options{
 		Path:      path,
 		EnvPrefix: "ANALYTICS",
 		Out:       &cfg,
 		Defaults: map[string]interface{}{
+			// Service
 			"service_name":    "analytics-api",
 			"service_version": "v1.0.0",
 
+			// Logging
 			"logging.level":    "info",
 			"logging.dev_mode": false,
+			"logging.format":   "console",
 
-			"telemetry.otel_endpoint": "otel-collector:4317",
-			"telemetry.insecure":      true,
+			// Telemetry
+			"telemetry.endpoint":         "otel-collector:4317",
+			"telemetry.insecure":         true,
+			"telemetry.reconnect_period": "5s",
+			"telemetry.timeout":          "5s",
+			"telemetry.sampler_ratio":    1.0,
+			"telemetry.service_name":     "analytics-api",
+			"telemetry.service_version":  "v1.0.0",
 
+			// HTTP
 			"http.port":             8082,
 			"http.read_timeout":     "10s",
 			"http.write_timeout":    "15s",
@@ -79,70 +63,64 @@ func Load(path string) (*Config, error) {
 			"http.healthz_path":     "/healthz",
 			"http.readyz_path":      "/readyz",
 
-			"timescaledb.dsn": "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable",
+			// Kafka
+			"kafka.brokers":  []string{"kafka:9092"},
+			"kafka.version":  "2.8.0",
+			"kafka.group_id": "analytics-api",
+			"kafka.backoff": map[string]interface{}{
+				"initial_interval": "1s",
+				"max_interval":     "30s",
+				"max_elapsed_time": "5m",
+			},
+			"topic_base": "candles",
 
-			"kafka.group_id":     "analytics-api",
-			"kafka.version":      "2.8.0",
-			"kafka.topic_prefix": "candles",
+			// TimescaleDB
+			"timescaledb.dsn":            "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable",
+			"timescaledb.migrations_dir": "/app/migrations/timescaledb",
 		},
-	})
-	if err != nil {
-		return nil, err
+	}); err != nil {
+		return nil, fmt.Errorf("config load failed: %w", err)
 	}
+
+	cfg.ApplyDefaults()
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
+
 	return &cfg, nil
 }
 
+// ApplyDefaults вызывает ApplyDefaults() всех вложенных компонентов.
+func (c *Config) ApplyDefaults() {
+	c.Logging.ApplyDefaults()
+	c.Telemetry.ApplyDefaults()
+	c.HTTP.ApplyDefaults()
+	c.Kafka.ApplyDefaults()
+}
+
+// Validate проверяет все вложенные компоненты.
 func (c *Config) Validate() error {
 	if c.ServiceName == "" || c.ServiceVersion == "" {
-		return fmt.Errorf("service name and version are required")
+		return fmt.Errorf("service name/version required")
 	}
-	if c.Telemetry.OTLPEndpoint == "" {
-		return fmt.Errorf("telemetry.otel_endpoint is required")
+	if err := c.Logging.Validate(); err != nil {
+		return fmt.Errorf("logging: %w", err)
 	}
-	if err := validateLogLevel(c.Logging.Level); err != nil {
-		return err
+	if err := c.Telemetry.Validate(); err != nil {
+		return fmt.Errorf("telemetry: %w", err)
 	}
-	if err := validateHTTP(&c.HTTP); err != nil {
-		return err
+	if err := c.HTTP.Validate(); err != nil {
+		return fmt.Errorf("http: %w", err)
 	}
-	if len(c.Kafka.Brokers) == 0 || c.Kafka.GroupID == "" || c.Kafka.Version == "" || c.Kafka.TopicPrefix == "" {
-		return fmt.Errorf("kafka config incomplete")
+	if err := c.Kafka.Validate(); err != nil {
+		return fmt.Errorf("kafka: %w", err)
 	}
-	if c.Timescale.DSN == "" {
-		return fmt.Errorf("timescaledb.dsn is required")
+	if err := c.Timescale.Validate(); err != nil {
+		return fmt.Errorf("timescaledb: %w", err)
 	}
-	return nil
-}
-
-func validateLogLevel(level string) error {
-	switch strings.ToLower(level) {
-	case "debug", "info", "warn", "error":
-		return nil
-	default:
-		return fmt.Errorf("invalid logging.level: %s", level)
-	}
-}
-
-func validateHTTP(cfg *HTTPConfig) error {
-	if cfg.Port <= 0 || cfg.Port > 65535 {
-		return fmt.Errorf("http.port must be between 1 and 65535")
-	}
-	if cfg.ReadTimeout <= 0 || cfg.WriteTimeout <= 0 || cfg.IdleTimeout <= 0 || cfg.ShutdownTimeout <= 0 {
-		return fmt.Errorf("http timeouts must be positive")
-	}
-	for _, path := range []string{cfg.MetricsPath, cfg.HealthzPath, cfg.ReadyzPath} {
-		if !strings.HasPrefix(path, "/") {
-			return fmt.Errorf("http path %q must start with '/'", path)
-		}
+	if c.TopicBase == "" {
+		return fmt.Errorf("topic_base is required")
 	}
 	return nil
-}
-
-func (c *Config) Print() {
-	b, _ := json.MarshalIndent(c, "", "  ")
-	fmt.Println("Loaded configuration:\n", string(b))
 }

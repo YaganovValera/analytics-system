@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/kafka/consumer.go
+// github.com/YaganovValera/analytics-system/services/analytics-api/internal/storage/kafka/consumer.go
 package kafka
 
 import (
@@ -7,10 +7,9 @@ import (
 	"strings"
 
 	commonkafka "github.com/YaganovValera/analytics-system/common/kafka"
-	commonconsumer "github.com/YaganovValera/analytics-system/common/kafka/consumer"
+	consumerkafka "github.com/YaganovValera/analytics-system/common/kafka/consumer"
 	"github.com/YaganovValera/analytics-system/common/logger"
 	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
-	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/config"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/transport"
 
 	"go.uber.org/zap"
@@ -18,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// Repository описывает интерфейс чтения свечей из Kafka.
 type Repository interface {
 	ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.CandleEvent, error)
 	Close() error
@@ -28,17 +28,12 @@ type kafkaRepo struct {
 	log      *logger.Logger
 }
 
-func New(ctx context.Context, cfg config.KafkaConfig, log *logger.Logger) (Repository, error) {
-	consumer, err := commonconsumer.New(ctx, commonconsumer.Config{
-		Brokers: cfg.Brokers,
-		GroupID: cfg.GroupID,
-		Version: cfg.Version,
-		Backoff: cfg.Backoff,
-	}, log)
+func New(ctx context.Context, cfg consumerkafka.Config, log *logger.Logger) (Repository, error) {
+	cons, err := consumerkafka.New(ctx, cfg, log)
 	if err != nil {
 		return nil, fmt.Errorf("kafka consumer init: %w", err)
 	}
-	return &kafkaRepo{consumer: consumer, log: log.Named("kafka")}, nil
+	return &kafkaRepo{consumer: cons, log: log.Named("kafka")}, nil
 }
 
 func (r *kafkaRepo) ConsumeCandles(ctx context.Context, topic string, symbol string) (<-chan *analyticspb.CandleEvent, error) {
@@ -46,10 +41,9 @@ func (r *kafkaRepo) ConsumeCandles(ctx context.Context, topic string, symbol str
 
 	go func() {
 		defer close(out)
-
 		err := r.consumer.Consume(ctx, []string{topic}, func(msg *commonkafka.Message) error {
 			if len(msg.Key) > 0 && !strings.EqualFold(string(msg.Key), symbol) {
-				return nil
+				return nil // пропускаем чужие symbol'ы
 			}
 
 			candle, err := transport.UnmarshalCandleFromBytes(msg.Value)
@@ -63,7 +57,7 @@ func (r *kafkaRepo) ConsumeCandles(ctx context.Context, topic string, symbol str
 						},
 					},
 				}
-				return nil
+				return nil // не прерываем поток
 			}
 
 			out <- &analyticspb.CandleEvent{

@@ -43,6 +43,8 @@ kafka:
 telemetry:
   endpoint: "otel-collector:4317"
   insecure: false
+  service_name:    "market-data-collector"
+  service_version: "v1.0.0"
   # остальные параметры (reconnect_period, timeout, sampler_ratio) берутся из defaults
 
 # ------------------------------------------------------------------------------

@@ -7,15 +7,15 @@ import (
 	"net"
 	"time"
 
-	"github.com/YaganovValera/analytics-system/common"
-	httpserver "github.com/YaganovValera/analytics-system/common/httpserver"
+	"github.com/YaganovValera/analytics-system/common/httpserver"
 	"github.com/YaganovValera/analytics-system/common/logger"
+	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/config"
-	grpcapi "github.com/YaganovValera/analytics-system/services/analytics-api/internal/grpc"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics"
-	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/kafka"
-	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/repository/timescaledb"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/storage/kafka"
+	timescaledb "github.com/YaganovValera/analytics-system/services/analytics-api/internal/storage/timescaledb"
+	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/transport/grpc"
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase"
 
 	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
@@ -27,80 +27,63 @@ import (
 )
 
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
-	common.InitServiceName(cfg.ServiceName)
+	serviceid.InitServiceName(cfg.ServiceName)
 	metrics.Register(nil)
 
-	// Telemetry
-	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.Config{
-		Endpoint:        cfg.Telemetry.OTLPEndpoint,
-		ServiceName:     cfg.ServiceName,
-		ServiceVersion:  cfg.ServiceVersion,
-		Insecure:        cfg.Telemetry.Insecure,
-		SamplerRatio:    1.0,
-		ReconnectPeriod: 5 * time.Second,
-		Timeout:         5 * time.Second,
-	}, log)
+	// === Telemetry ===
+	cfg.Telemetry.ServiceName = cfg.ServiceName
+	cfg.Telemetry.ServiceVersion = cfg.ServiceVersion
+	shutdownTracer, err := telemetry.InitTracer(ctx, cfg.Telemetry, log)
 	if err != nil {
 		return fmt.Errorf("init tracer: %w", err)
 	}
 	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
 
-	// TimescaleDB
+	// === TimescaleDB ===
 	db, err := timescaledb.New(cfg.Timescale, log)
 	if err != nil {
 		return fmt.Errorf("timescaledb: %w", err)
 	}
 	defer db.Close()
 
-	// Kafka
+	// === Kafka Consumer ===
 	kafkaRepo, err := kafka.New(ctx, cfg.Kafka, log)
 	if err != nil {
 		return fmt.Errorf("kafka: %w", err)
 	}
 	defer kafkaRepo.Close()
 
-	// gRPC server
+	// === Usecases ===
+	getHandler := usecase.NewGetCandlesHandler(db)
+	streamHandler := usecase.NewStreamCandlesHandler(kafkaRepo, cfg.TopicBase)
+	subscribeHandler := usecase.NewSubscribeCandlesHandler(kafkaRepo, cfg.TopicBase, log)
+
+	// === gRPC Server ===
 	grpcServer := grpcstd.NewServer(
 		grpcstd.StatsHandler(otelgrpc.NewServerHandler()),
 	)
-
-	analyticsHandler := grpcapi.NewServer(
-		usecase.NewGetCandlesHandler(db),
-		usecase.NewStreamCandlesHandler(kafkaRepo),
-	)
-	analyticspb.RegisterAnalyticsServiceServer(grpcServer, analyticsHandler)
+	analyticspb.RegisterAnalyticsServiceServer(grpcServer,
+		grpc.NewServer(getHandler, streamHandler, subscribeHandler))
 
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.HTTP.Port+1))
 	if err != nil {
 		return fmt.Errorf("listen grpc: %w", err)
 	}
 
-	// Readiness проверяет и БД, и Kafka
+	// === HTTP Server ===
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-
-		if err := db.Ping(ctxPing); err != nil {
-			return fmt.Errorf("timescaledb not ready: %w", err)
-		}
-		return nil
+		return db.Ping(ctxPing)
 	}
 
-	httpSrv, err := httpserver.New(httpserver.Config{
-		Addr:            fmt.Sprintf(":%d", cfg.HTTP.Port),
-		ReadTimeout:     cfg.HTTP.ReadTimeout,
-		WriteTimeout:    cfg.HTTP.WriteTimeout,
-		IdleTimeout:     cfg.HTTP.IdleTimeout,
-		ShutdownTimeout: cfg.HTTP.ShutdownTimeout,
-		MetricsPath:     cfg.HTTP.MetricsPath,
-		HealthzPath:     cfg.HTTP.HealthzPath,
-		ReadyzPath:      cfg.HTTP.ReadyzPath,
-	}, readiness, log, nil)
+	httpSrv, err := httpserver.New(cfg.HTTP, readiness, log,
+		nil, httpserver.RecoverMiddleware, httpserver.CORSMiddleware())
 	if err != nil {
-		return fmt.Errorf("httpserver: %w", err)
+		return fmt.Errorf("httpserver init: %w", err)
 	}
 
-	log.WithContext(ctx).Info("analytics-api: components initialized, starting run loops")
+	log.WithContext(ctx).Info("analytics-api: starting services")
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error { return httpSrv.Run(ctx) })
@@ -108,14 +91,14 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	if err := g.Wait(); err != nil {
 		if ctx.Err() == context.Canceled {
-			log.WithContext(ctx).Info("analytics-api exited on context cancel")
+			log.WithContext(ctx).Info("analytics-api shut down cleanly")
 			return nil
 		}
 		log.WithContext(ctx).Error("analytics-api exited with error", zap.Error(err))
 		return err
 	}
 
-	log.WithContext(ctx).Info("analytics-api exited cleanly")
+	log.WithContext(ctx).Info("analytics-api shut down complete")
 	return nil
 }
 

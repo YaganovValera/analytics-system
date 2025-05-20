@@ -42,10 +42,6 @@ func main() {
 	}
 	defer log.Sync()
 
-	if cfg.Logging.DevMode {
-		cfg.Print()
-	}
-
 	log.Info("starting analytics-api service",
 		zap.String("service.name", cfg.ServiceName),
 		zap.String("service.version", cfg.ServiceVersion),
