@@ -3,12 +3,13 @@ package usecase
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/backoff"
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
 
@@ -40,38 +41,42 @@ func (h *refreshHandler) Handle(ctx context.Context, req *authpb.RefreshTokenReq
 	if err != nil {
 		metrics.RefreshTotal.WithLabelValues("invalid").Inc()
 		h.log.WithContext(ctx).Warn("invalid refresh token", zap.Error(err))
-		return nil, fmt.Errorf("parse refresh: %w", err)
+		return nil, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
 	}
 
 	token, err := h.tokens.FindByJTI(ctx, claims.JTI)
 	if err != nil {
-		metrics.RefreshTotal.WithLabelValues("fail").Inc()
+		metrics.RefreshTotal.WithLabelValues("lookup_error").Inc()
 		h.log.WithContext(ctx).Error("refresh token lookup failed", zap.Error(err))
-		return nil, fmt.Errorf("token lookup: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to lookup token: %v", err)
 	}
 
 	if token.RevokedAt != nil {
-		metrics.RefreshTotal.WithLabelValues("fail").Inc()
-		h.log.WithContext(ctx).Warn("refresh token already revoked", zap.String("jti", claims.JTI))
-		return nil, fmt.Errorf("refresh token was revoked")
+		metrics.RefreshTotal.WithLabelValues("reuse_detected").Inc()
+		h.log.WithContext(ctx).Warn("refresh token reuse attempt", zap.String("jti", claims.JTI))
+		return nil, status.Error(codes.Unauthenticated, "refresh token already used or revoked")
 	}
 
-	// Защищаем от повторного использования: revoke старый JTI
+	// Отзываем старый токен
 	if err := h.tokens.RevokeByJTI(ctx, claims.JTI); err != nil {
-		h.log.WithContext(ctx).Warn("failed to revoke old token", zap.String("jti", claims.JTI), zap.Error(err))
+		h.log.WithContext(ctx).Warn("failed to revoke old refresh token",
+			zap.String("jti", claims.JTI), zap.Error(err))
 	}
 
+	// Генерируем access + refresh
 	access, accessClaims, err := h.signer.Generate(claims.UserID, claims.Roles, jwt.AccessToken)
 	if err != nil {
 		h.log.WithContext(ctx).Error("generate access failed", zap.Error(err))
-		return nil, fmt.Errorf("generate access: %w", err)
+		return nil, status.Errorf(codes.Internal, "generate access: %v", err)
 	}
+
 	refresh, refreshClaims, err := h.signer.Generate(claims.UserID, claims.Roles, jwt.RefreshToken)
 	if err != nil {
 		h.log.WithContext(ctx).Error("generate refresh failed", zap.Error(err))
-		return nil, fmt.Errorf("generate refresh: %w", err)
+		return nil, status.Errorf(codes.Internal, "generate refresh: %v", err)
 	}
 
+	// Сохраняем новый refresh
 	err = backoff.Execute(ctx, backoff.Config{MaxElapsedTime: 2 * time.Second}, func(ctx context.Context) error {
 		return h.tokens.Store(ctx, &postgres.RefreshToken{
 			ID:        refreshClaims.JTI,
@@ -82,15 +87,16 @@ func (h *refreshHandler) Handle(ctx context.Context, req *authpb.RefreshTokenReq
 			ExpiresAt: refreshClaims.ExpiresAt.Time,
 		})
 	}, nil)
+
 	if err != nil {
-		metrics.RefreshTotal.WithLabelValues("fail").Inc()
+		metrics.RefreshTotal.WithLabelValues("store_failed").Inc()
 		h.log.WithContext(ctx).Error("store refresh failed", zap.Error(err))
-		return nil, fmt.Errorf("store refresh: %w", err)
+		return nil, status.Errorf(codes.Internal, "store refresh: %v", err)
 	}
 
+	metrics.RefreshTotal.WithLabelValues("success").Inc()
 	metrics.IssuedTokens.WithLabelValues("access").Inc()
 	metrics.IssuedTokens.WithLabelValues("refresh").Inc()
-	metrics.RefreshTotal.WithLabelValues("ok").Inc()
 
 	return &authpb.RefreshTokenResponse{
 		AccessToken:  access,

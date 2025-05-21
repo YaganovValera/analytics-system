@@ -59,16 +59,11 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		return nil, status.Errorf(codes.InvalidArgument, "password must be at least %d characters", minPasswordLength)
 	}
 
-	roles, err := jwt.DeduplicateAndValidateRoles(req.Roles)
+	roles, err := jwt.NormalizeRoles(req.Roles)
 	if err != nil {
+		metrics.RegisterTotal.WithLabelValues("invalid").Inc()
+		h.log.WithContext(ctx).Warn("invalid roles in register", zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid roles: %v", err)
-	}
-
-	for _, role := range roles {
-		if !jwt.IsValidRole(role) {
-			h.log.WithContext(ctx).Error("invalid role", zap.String("role", role))
-			return nil, fmt.Errorf("invalid role: %s", role)
-		}
 	}
 
 	exists, err := h.users.ExistsByUsername(ctx, username)
@@ -77,7 +72,7 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		return nil, fmt.Errorf("check username: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("username already exists")
+		return nil, status.Error(codes.AlreadyExists, "username already exists")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -91,18 +86,18 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		ID:           userID,
 		Username:     username,
 		PasswordHash: string(hash),
-		Roles:        req.Roles,
+		Roles:        roles,
 	}
 	if err := h.users.Create(ctx, user); err != nil {
 		h.log.WithContext(ctx).Error("create user failed", zap.Error(err))
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	access, accessClaims, err := h.signer.Generate(userID, req.Roles, jwt.AccessToken)
+	access, accessClaims, err := h.signer.Generate(userID, roles, jwt.AccessToken)
 	if err != nil {
 		return nil, fmt.Errorf("generate access: %w", err)
 	}
-	refresh, refreshClaims, err := h.signer.Generate(userID, req.Roles, jwt.RefreshToken)
+	refresh, refreshClaims, err := h.signer.Generate(userID, roles, jwt.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh: %w", err)
 	}
@@ -121,6 +116,7 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		return nil, fmt.Errorf("store refresh: %w", err)
 	}
 
+	metrics.RegisterTotal.WithLabelValues("success").Inc()
 	metrics.IssuedTokens.WithLabelValues("access").Inc()
 	metrics.IssuedTokens.WithLabelValues("refresh").Inc()
 
