@@ -21,7 +21,7 @@ type Config struct {
 // ApplyDefaults applies fallback defaults if values are unset.
 func (c *Config) ApplyDefaults() {
 	if c.BufferSize <= 0 {
-		c.BufferSize = 100
+		c.BufferSize = 10000
 	}
 	if c.ReadTimeout <= 0 {
 		c.ReadTimeout = 30 * time.Second

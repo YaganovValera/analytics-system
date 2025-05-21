@@ -1,5 +1,5 @@
 // api-gateway/internal/client/auth/client.go
-package authclient
+package auth
 
 import (
 	"context"
@@ -8,18 +8,20 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Client оборачивает gRPC-клиент AuthService.
 type Client struct {
 	authpb.AuthServiceClient
 }
 
+// New создаёт клиента AuthService.
 func New(conn *grpc.ClientConn) *Client {
 	return &Client{
 		AuthServiceClient: authpb.NewAuthServiceClient(conn),
 	}
 }
 
-// Ping проверяет доступность AuthService через ValidateToken.
+// Ping проверяет доступность AuthService через ValidateToken с фейковым токеном.
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.ValidateToken(ctx, &authpb.ValidateTokenRequest{Token: "fake"})
-	return err // ожидаем ошибку, главное — соединение живое
+	_, err := c.ValidateToken(ctx, &authpb.ValidateTokenRequest{Token: "__ping__"})
+	return err
 }

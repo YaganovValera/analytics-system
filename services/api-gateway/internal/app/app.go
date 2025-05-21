@@ -1,4 +1,4 @@
-// api-gateway/internal/app/app.go
+// api-gateway/internal/api/api.go
 package app
 
 import (
@@ -11,9 +11,11 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
+
 	analyticsclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/analytics"
 	authclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/auth"
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/config"
+	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/handler"
 	transport "github.com/YaganovValera/analytics-system/services/api-gateway/internal/transport/http"
 
 	"go.uber.org/zap"
@@ -25,50 +27,49 @@ import (
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	serviceid.InitServiceName(cfg.ServiceName)
 
-	// === Telemetry
+	// === OpenTelemetry ===
 	cfg.Telemetry.ServiceName = cfg.ServiceName
 	cfg.Telemetry.ServiceVersion = cfg.ServiceVersion
 	shutdownTracer, err := telemetry.InitTracer(ctx, cfg.Telemetry, log)
 	if err != nil {
 		return fmt.Errorf("init telemetry: %w", err)
 	}
-	defer shutdownSafe(ctx, "telemetry", shutdownTracer, log)
+	defer shutdownSafe(ctx, "telemetry", func() error { return shutdownTracer(ctx) }, log)
 
-	// === gRPC Clients
+	// === gRPC clients ===
 	authConn, err := grpc.NewClient("auth:8085", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("auth grpc connect: %w", err)
+		return fmt.Errorf("auth grpc dial: %w", err)
 	}
-	defer shutdownSafe(ctx, "auth-grpc", func(ctx context.Context) error {
-		return authConn.Close()
-	}, log)
+	defer shutdownSafe(ctx, "auth-grpc", authConn.Close, log)
+	authClient := authclient.New(authConn)
 
 	analyticsConn, err := grpc.NewClient("analytics-api:8083", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("analytics grpc connect: %w", err)
+		return fmt.Errorf("analytics grpc dial: %w", err)
 	}
-	defer shutdownSafe(ctx, "analytics-grpc", func(ctx context.Context) error {
-		return analyticsConn.Close()
-	}, log)
-
-	authClient := authclient.New(authConn)
+	defer shutdownSafe(ctx, "analytics-grpc", analyticsConn.Close, log)
 	analyticsClient := analyticsclient.New(analyticsConn)
 
-	handler := transport.NewHandler(authClient, analyticsClient)
-	middleware := transport.NewMiddleware(authClient)
+	// === HTTP handlers and middleware ===
+	h := handler.NewHandler(authClient, analyticsClient)
+	m := transport.NewMiddleware(authClient)
 
-	// === Extra HTTP routes
 	extraRoutes := map[string]http.Handler{
-		"/": transport.Routes(handler, middleware),
+		"/": transport.Routes(h, m),
 	}
 
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		return authClient.Ping(ctxPing) // можно также analyticsClient
+		return authClient.Ping(ctxPing)
 	}
 
-	httpSrv, err := httpserver.New(cfg.HTTP, readiness, log, extraRoutes,
+	httpSrv, err := httpserver.New(
+		cfg.HTTP,
+		readiness,
+		log,
+		extraRoutes,
 		httpserver.RecoverMiddleware,
 		httpserver.CORSMiddleware(),
 	)
@@ -93,9 +94,9 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	return nil
 }
 
-func shutdownSafe(ctx context.Context, name string, fn func(context.Context) error, log *logger.Logger) {
+func shutdownSafe(ctx context.Context, name string, fn func() error, log *logger.Logger) {
 	log.WithContext(ctx).Info(name + ": shutting down")
-	if err := fn(ctx); err != nil {
+	if err := fn(); err != nil {
 		log.WithContext(ctx).Error(name+" shutdown failed", zap.Error(err))
 	} else {
 		log.WithContext(ctx).Info(name + ": shutdown complete")

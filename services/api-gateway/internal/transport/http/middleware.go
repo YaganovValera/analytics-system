@@ -2,67 +2,34 @@
 package http
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
-	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
+	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/auth"
+	"google.golang.org/grpc/metadata"
 )
 
+// Middleware описывает зависимые middleware компоненты.
 type Middleware struct {
-	authClient authpb.AuthServiceClient
+	auth *auth.Client
 }
 
-func NewMiddleware(authClient authpb.AuthServiceClient) *Middleware {
-	return &Middleware{authClient}
+// NewMiddleware создаёт Middleware.
+func NewMiddleware(auth *auth.Client) *Middleware {
+	return &Middleware{auth: auth}
 }
 
-type contextKey string
-
-const (
-	ctxUserID contextKey = "user_id"
-	ctxRoles  contextKey = "roles"
-)
-
-func (m *Middleware) JWTMiddleware(next http.Handler) http.Handler {
+// WithContext извлекает Authorization токен и прокидывает его как gRPC metadata.
+func (m *Middleware) WithContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
 		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
-			return
-		}
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-
-		resp, err := m.authClient.ValidateToken(r.Context(), &authpb.ValidateTokenRequest{Token: token})
-		if err != nil || !resp.Valid {
-			http.Error(w, "invalid token", http.StatusUnauthorized)
-			return
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
 		}
 
-		ctx := context.WithValue(r.Context(), ctxUserID, resp.Username)
-		ctx = context.WithValue(ctx, ctxRoles, resp.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func (m *Middleware) RBAC(allowed []string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw := r.Context().Value(ctxRoles)
-			roles, ok := raw.([]string)
-			if !ok {
-				http.Error(w, "missing roles", http.StatusForbidden)
-				return
-			}
-			for _, role := range roles {
-				for _, want := range allowed {
-					if role == want {
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-			}
-			http.Error(w, "forbidden", http.StatusForbidden)
-		})
-	}
 }

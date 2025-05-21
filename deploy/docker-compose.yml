@@ -169,6 +169,11 @@ services:
     restart: always
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 
   auth:
@@ -186,6 +191,11 @@ services:
     restart: always
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api-gateway:
     build:

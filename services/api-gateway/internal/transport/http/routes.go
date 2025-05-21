@@ -4,20 +4,30 @@ package http
 import (
 	"net/http"
 
+	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/handler"
+
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-func Routes(h *Handler, mw *Middleware) http.Handler {
+// Routes возвращает основной маршрутизатор с подключёнными роутами и middleware.
+func Routes(h *handler.Handler, m *Middleware) http.Handler {
 	r := chi.NewRouter()
 
-	r.Post("/login", h.Login)
-	r.Post("/register", h.Register)
-	r.Post("/refresh", h.Refresh)
+	// Встроенные middleware
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
-	r.Group(func(r chi.Router) {
-		r.Use(mw.JWTMiddleware)
-		r.Use(mw.RBAC([]string{"user", "admin"}))
+	// Пользовательские middleware
+	r.Use(m.WithContext)
 
+	// Public endpoints
+	r.Route("/v1", func(r chi.Router) {
+		r.Post("/login", h.Login)
+		r.Post("/register", h.Register)
+		r.Post("/refresh", h.Refresh)
 		r.Get("/candles", h.GetCandles)
 	})
 
