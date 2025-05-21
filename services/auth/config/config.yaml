@@ -7,9 +7,8 @@ service_version: "v1.0.0"
 # JWT
 # ------------------------------------------------------------------------------
 jwt:
-  secret: "changeme-super-secret-key"  # HMAC SHA256 (HS256)
   access_ttl: "15m"
-  refresh_ttl: "7d"
+  refresh_ttl: "168h"
   issuer: "auth-service"
   audience: "analytics-system"
 
@@ -17,7 +16,7 @@ jwt:
 # PostgreSQL (TimescaleDB-compatible)
 # ------------------------------------------------------------------------------
 postgres:
-  dsn: "postgres://user:pass@postgres:5432/auth?sslmode=disable"
+  dsn: postgres://user:pass@timescaledb:5432/auth?sslmode=disable
   migrations_dir: "/app/migrations/postgres"
 
 # ------------------------------------------------------------------------------
@@ -35,8 +34,9 @@ telemetry:
   endpoint: "otel-collector:4317"
   insecure: true
   reconnect_period: "5s"
+  service_name:    "auth"
+  service_version: "v1.0.0"
   timeout: "5s"
-  sampler_ratio: 1.0
 
 # ------------------------------------------------------------------------------
 # HTTP server for healthz/metrics

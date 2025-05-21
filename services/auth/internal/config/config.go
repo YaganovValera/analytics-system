@@ -8,6 +8,8 @@ import (
 	commonhttp "github.com/YaganovValera/analytics-system/common/httpserver"
 	commonlogger "github.com/YaganovValera/analytics-system/common/logger"
 	commontel "github.com/YaganovValera/analytics-system/common/telemetry"
+
+	jwtconfig "github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
 	pgconfig "github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
 )
 
@@ -19,33 +21,8 @@ type Config struct {
 	Logging   commonlogger.Config `mapstructure:"logging"`
 	Telemetry commontel.Config    `mapstructure:"telemetry"`
 	HTTP      commonhttp.Config   `mapstructure:"http"`
-	JWT       JWTConfig           `mapstructure:"jwt"`
+	JWT       jwtconfig.JWTConfig `mapstructure:"jwt"`
 	Postgres  pgconfig.Config     `mapstructure:"postgres"`
-}
-
-// JWTConfig описывает параметры генерации и валидации JWT.
-type JWTConfig struct {
-	Secret     string `mapstructure:"secret"`
-	AccessTTL  string `mapstructure:"access_ttl"`
-	RefreshTTL string `mapstructure:"refresh_ttl"`
-	Issuer     string `mapstructure:"issuer"`
-	Audience   string `mapstructure:"audience"`
-}
-
-func (c JWTConfig) Validate() error {
-	if c.Secret == "" {
-		return fmt.Errorf("jwt: secret is required")
-	}
-	if c.AccessTTL == "" {
-		return fmt.Errorf("jwt: access_ttl is required")
-	}
-	if c.RefreshTTL == "" {
-		return fmt.Errorf("jwt: refresh_ttl is required")
-	}
-	if c.Issuer == "" || c.Audience == "" {
-		return fmt.Errorf("jwt: issuer and audience are required")
-	}
-	return nil
 }
 
 // Load читает конфиг и валидирует все вложенные поля.
@@ -81,10 +58,9 @@ func Load(path string) (*Config, error) {
 			"http.healthz_path":     "/healthz",
 			"http.readyz_path":      "/readyz",
 
-			// JWT (секрет желательно переопределять в ENV)
-			"jwt.secret":      "changeme-super-secret-key",
+			// JWT
 			"jwt.access_ttl":  "15m",
-			"jwt.refresh_ttl": "7d",
+			"jwt.refresh_ttl": "168h",
 			"jwt.issuer":      "auth-service",
 			"jwt.audience":    "analytics-system",
 

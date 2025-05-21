@@ -61,9 +61,10 @@ services:
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: pass
-      POSTGRES_DB: analytics
     ports:
       - "5432:5432"
+    volumes:
+      - ./init-timescaledb.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - backend
     healthcheck:
@@ -71,6 +72,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -125,17 +127,7 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
-    environment:
-      COLLECTOR_SERVICE_NAME: market-data-collector
-      COLLECTOR_SERVICE_VERSION: "v1.0.0"
-      COLLECTOR_KAFKA_BROKERS: kafka:9092
-      COLLECTOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-      COLLECTOR_TELEMETRY_INSECURE: "true"
-      OTEL_SERVICE_NAME: market-data-collector
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-      OTEL_TRACES_SAMPLER: parentbased_traceidratio
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
+
     restart: always
     networks:
       - backend
@@ -153,21 +145,7 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
-    environment:
-      PREPROCESSOR_SERVICE_NAME: preprocessor
-      PREPROCESSOR_SERVICE_VERSION: "v1.0.0"
-      PREPROCESSOR_KAFKA_BROKERS: kafka:9092
-      PREPROCESSOR_KAFKA_CONSUMER_GROUP_ID: preprocessor
-      PREPROCESSOR_TIMESCALEDB_DSN: postgres://user:pass@timescaledb:5432/analytics?sslmode=disable
-      PREPROCESSOR_TIMESCALEDB_MIGRATIONS_DIR: /app/migrations/timescaledb
-      PREPROCESSOR_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-      PREPROCESSOR_TELEMETRY_INSECURE: "true"
-
-      OTEL_SERVICE_NAME: preprocessor
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-      OTEL_TRACES_SAMPLER: parentbased_traceidratio
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      
     restart: always
     networks:
       - backend
@@ -182,28 +160,28 @@ services:
       timescaledb:
         condition: service_healthy
     ports:
-      - "8082:8082"
+      - "8082:8082"  # HTTP server (metrics, healthz, readyz)
+      - "8083:8083"  # gRPC server (по порту +1)
+
+    restart: always
+    networks:
+      - backend
+
+
+  auth:
+    build:
+      context: ../
+      dockerfile: services/auth/Dockerfile
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8084:8084"  # HTTP server (metrics, healthz, readyz)
+      - "8085:8085"  # gRPC server (по порту +1)
+    
     environment:
-      ANALYTICS_SERVICE_NAME: analytics-api
-      ANALYTICS_SERVICE_VERSION: "v1.0.0"
+      AUTH_JWT_SECRET: "EzPEzub2UB9OV8rHc6nK/U+tNXqZhmLgGZbGAheTOtI="
 
-      ANALYTICS_KAFKA_BROKERS: kafka:9092
-      ANALYTICS_KAFKA_GROUP_ID: analytics-api
-      ANALYTICS_KAFKA_VERSION: "2.8.0"
-      
-      ANALYTICS_TOPIC_BASE: candles
-
-      ANALYTICS_TIMESCALEDB_DSN: postgres://user:pass@timescaledb:5432/analytics?sslmode=disable
-
-      ANALYTICS_TELEMETRY_OTEL_ENDPOINT: otel-collector:4317
-      ANALYTICS_TELEMETRY_INSECURE: "true"
-      ANALYTICS_TELEMETRY_SERVICE_NAME: analytics-api
-
-      OTEL_SERVICE_NAME: analytics-api
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-      OTEL_TRACES_SAMPLER: parentbased_traceidratio
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
     restart: always
     networks:
       - backend
