@@ -47,6 +47,8 @@ func Load(path string) (*Config, error) {
 			"telemetry.reconnect_period": "5s",
 			"telemetry.timeout":          "5s",
 			"telemetry.sampler_ratio":    1.0,
+			"telemetry.service_name":     "market-data-collector",
+			"telemetry.service_version":  "v1.0.0",
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("config load failed: %w", err)

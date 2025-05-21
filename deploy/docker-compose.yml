@@ -186,3 +186,20 @@ services:
     restart: always
     networks:
       - backend
+
+  api-gateway:
+    build:
+      context: ../
+      dockerfile: services/api-gateway/Dockerfile
+    depends_on:
+      auth:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+    ports:
+      - "8080:8080"  # HTTP server (REST, metrics, healthz, readyz)
+    env_file:
+      - ../services/api-gateway/.env
+    restart: always
+    networks:
+      - backend
