@@ -32,6 +32,7 @@ message ValidateTokenResponse {
   string username = 2;
   repeated string roles = 3;
   google.protobuf.Timestamp expires_at = 4;
+  market.common.v1.RequestMetadata metadata = 5; 
 }
 
 // Request to refresh access token using refresh token.

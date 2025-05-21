@@ -6,21 +6,13 @@ import (
 	"context"
 	"strings"
 
+	"github.com/YaganovValera/analytics-system/common/ctxkeys"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-)
-
-// Context keys for user metadata
-
-type ctxKey string
-
-const (
-	ctxUserID ctxKey = "user_id"
-	ctxRoles  ctxKey = "roles"
-	ctxJTI    ctxKey = "jti"
 )
 
 // UnaryJWTInterceptor validates access token and enriches context.
@@ -51,9 +43,9 @@ func UnaryJWTInterceptor(verifier jwt.Verifier) grpc.UnaryServerInterceptor {
 		}
 
 		// Enrich context
-		ctx = context.WithValue(ctx, ctxUserID, claims.UserID)
-		ctx = context.WithValue(ctx, ctxRoles, claims.Roles)
-		ctx = context.WithValue(ctx, ctxJTI, claims.JTI)
+		ctx = context.WithValue(ctx, ctxkeys.UserIDKey, claims.UserID)
+		ctx = context.WithValue(ctx, ctxkeys.RolesKey, claims.Roles)
+		ctx = context.WithValue(ctx, ctxkeys.JTI, claims.JTI)
 
 		return handler(ctx, req)
 	}
@@ -67,9 +59,9 @@ type AuthContext struct {
 }
 
 func FromContext(ctx context.Context) *AuthContext {
-	uid, _ := ctx.Value(ctxUserID).(string)
-	roles, _ := ctx.Value(ctxRoles).([]string)
-	jti, _ := ctx.Value(ctxJTI).(string)
+	uid, _ := ctx.Value(ctxkeys.UserIDKey).(string)
+	roles, _ := ctx.Value(ctxkeys.RolesKey).([]string)
+	jti, _ := ctx.Value(ctxkeys.JTI).(string)
 	return &AuthContext{
 		UserID: uid,
 		Roles:  roles,
@@ -79,7 +71,7 @@ func FromContext(ctx context.Context) *AuthContext {
 
 // RequireRoles проверяет наличие хотя бы одной из требуемых ролей.
 func RequireRoles(ctx context.Context, allowed ...string) error {
-	roles, _ := ctx.Value(ctxRoles).([]string)
+	roles, _ := ctx.Value(ctxkeys.RolesKey).([]string)
 	roleSet := make(map[string]struct{}, len(roles))
 	for _, r := range roles {
 		roleSet[r] = struct{}{}

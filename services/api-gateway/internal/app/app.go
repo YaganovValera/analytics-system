@@ -1,4 +1,4 @@
-// api-gateway/internal/api/api.go
+// api-gateway/internal/app/app.go
 package app
 
 import (
@@ -16,6 +16,7 @@ import (
 	authclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/auth"
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/config"
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/handler"
+	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/middleware"
 	transport "github.com/YaganovValera/analytics-system/services/api-gateway/internal/transport/http"
 
 	"go.uber.org/zap"
@@ -65,14 +66,39 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return authClient.Ping(ctxPing)
 	}
 
+	// 1. JWT кэш
+	jwtCache := middleware.NewJWTCache()
+
+	// 2. RBAC config
+	rbacCfg := middleware.RBACConfig{
+		Log: log,
+		Permissions: map[middleware.Route][]string{
+			{Method: "POST", Path: "/admin/*"}: {"admin"},
+			{Method: "GET", Path: "/candles"}:  {"user", "admin", "viewer"},
+		},
+	}
+
+	// 3. Rate limiter
+	rateLimit := middleware.RateLimitMiddleware(middleware.RateLimitConfig{
+		RequestsPerSec: 5,
+		BurstSize:      10,
+		Log:            log,
+	})
+
 	httpSrv, err := httpserver.New(
 		cfg.HTTP,
 		readiness,
 		log,
 		extraRoutes,
+
 		httpserver.RecoverMiddleware,
+		middleware.RequestLoggerMiddleware(log),
+		middleware.JWTMiddleware(authClient, jwtCache, log),
+		middleware.RBACMiddleware(rbacCfg),
+		rateLimit,
 		httpserver.CORSMiddleware(),
 	)
+
 	if err != nil {
 		return fmt.Errorf("httpserver init: %w", err)
 	}
