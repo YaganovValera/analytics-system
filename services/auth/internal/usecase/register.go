@@ -66,6 +66,17 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		return nil, status.Errorf(codes.InvalidArgument, "invalid roles: %v", err)
 	}
 
+	const allowAdminFromPublic = false
+
+	// Ограничить admin-роли при регистрации
+	if !allowAdminFromPublic {
+		for _, role := range roles {
+			if role == string(jwt.RoleAdmin) {
+				return nil, status.Error(codes.PermissionDenied, "cannot self-register with admin role")
+			}
+		}
+	}
+
 	exists, err := h.users.ExistsByUsername(ctx, username)
 	if err != nil {
 		h.log.WithContext(ctx).Error("check username failed", zap.Error(err))

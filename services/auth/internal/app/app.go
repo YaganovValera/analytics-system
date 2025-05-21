@@ -79,7 +79,10 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	// === gRPC Server ===
 	grpcServer := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.UnaryInterceptor(interceptor.UnaryJWTInterceptor(jwtSigner)),
+		grpc.ChainUnaryInterceptor(
+			interceptor.UnaryJWTInterceptor(jwtSigner),
+			interceptor.UnaryRBACInterceptor(),
+		),
 	)
 
 	authpb.RegisterAuthServiceServer(grpcServer, grpcTransport.NewServer(h, jwtSigner))
