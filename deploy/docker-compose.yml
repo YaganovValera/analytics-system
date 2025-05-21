@@ -127,7 +127,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
-
+    env_file:
+      - ../services/market-data-collector/.env
     restart: always
     networks:
       - backend
@@ -145,7 +146,8 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
-      
+    env_file:
+      - ../services/preprocessor/.env
     restart: always
     networks:
       - backend
@@ -162,7 +164,8 @@ services:
     ports:
       - "8082:8082"  # HTTP server (metrics, healthz, readyz)
       - "8083:8083"  # gRPC server (по порту +1)
-
+    env_file:
+      - ../services/analytics-api/.env
     restart: always
     networks:
       - backend
@@ -178,10 +181,8 @@ services:
     ports:
       - "8084:8084"  # HTTP server (metrics, healthz, readyz)
       - "8085:8085"  # gRPC server (по порту +1)
-    
-    environment:
-      AUTH_JWT_SECRET: "EzPEzub2UB9OV8rHc6nK/U+tNXqZhmLgGZbGAheTOtI="
-
+    env_file:
+      - ../services/auth/.env
     restart: always
     networks:
       - backend

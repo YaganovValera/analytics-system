@@ -59,6 +59,7 @@ func Load(path string) (*Config, error) {
 			"http.readyz_path":      "/readyz",
 
 			// JWT
+			"jwt.secret":      "",
 			"jwt.access_ttl":  "15m",
 			"jwt.refresh_ttl": "168h",
 			"jwt.issuer":      "auth-service",

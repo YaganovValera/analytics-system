@@ -53,7 +53,7 @@ func Load(path string) (*Config, error) {
 
 			// Telemetry
 			"telemetry.endpoint":        "otel-collector:4317",
-			"telemetry.insecure":        false,
+			"telemetry.insecure":        true,
 			"telemetry.service_name":    "market-data-collector",
 			"telemetry.service_version": "v1.0.0",
 
