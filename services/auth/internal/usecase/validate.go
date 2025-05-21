@@ -1,4 +1,4 @@
-// internal/usecase/validate.go
+// auth/internal/usecase/validate.go
 package usecase
 
 import (

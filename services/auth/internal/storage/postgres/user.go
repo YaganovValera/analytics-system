@@ -3,8 +3,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,4 +37,18 @@ func (r *userRepo) Create(ctx context.Context, u *User) error {
 		return fmt.Errorf("user insert failed: %w", err)
 	}
 	return nil
+}
+
+func (r *userRepo) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	const q = `SELECT 1 FROM users WHERE username = $1`
+	row := r.db.QueryRow(ctx, q, username)
+	var dummy int
+	err := row.Scan(&dummy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("exists check failed: %w", err)
+	}
+	return true, nil
 }

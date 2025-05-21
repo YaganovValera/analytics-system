@@ -71,10 +71,26 @@ message LogoutResponse {
   bool success = 1;
 }
 
+message RegisterRequest {
+  string username = 1;
+  string password = 2;
+  repeated string roles = 3;
+  market.common.v1.RequestMetadata metadata = 4;
+}
+
+message RegisterResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+
+
 service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
   rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc Register(RegisterRequest) returns (RegisterResponse);
 }

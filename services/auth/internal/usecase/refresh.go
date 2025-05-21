@@ -56,6 +56,11 @@ func (h *refreshHandler) Handle(ctx context.Context, req *authpb.RefreshTokenReq
 		return nil, fmt.Errorf("refresh token was revoked")
 	}
 
+	// Защищаем от повторного использования: revoke старый JTI
+	if err := h.tokens.RevokeByJTI(ctx, claims.JTI); err != nil {
+		h.log.WithContext(ctx).Warn("failed to revoke old token", zap.String("jti", claims.JTI), zap.Error(err))
+	}
+
 	access, accessClaims, err := h.signer.Generate(claims.UserID, claims.Roles, jwt.AccessToken)
 	if err != nil {
 		h.log.WithContext(ctx).Error("generate access failed", zap.Error(err))
@@ -69,7 +74,7 @@ func (h *refreshHandler) Handle(ctx context.Context, req *authpb.RefreshTokenReq
 
 	err = backoff.Execute(ctx, backoff.Config{MaxElapsedTime: 2 * time.Second}, func(ctx context.Context) error {
 		return h.tokens.Store(ctx, &postgres.RefreshToken{
-			ID:        claims.JTI,
+			ID:        refreshClaims.JTI,
 			UserID:    claims.UserID,
 			JTI:       refreshClaims.JTI,
 			Token:     refresh,

@@ -134,6 +134,26 @@ func (s *Server) Logout(ctx context.Context, req *authpb.LogoutRequest) (*authpb
 	return &authpb.LogoutResponse{Success: true}, nil
 }
 
+func (s *Server) Register(ctx context.Context, req *authpb.RegisterRequest) (*authpb.RegisterResponse, error) {
+	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "Register")
+	defer span.End()
+
+	metrics.GRPCRequestsTotal.WithLabelValues("Register").Inc()
+
+	if req == nil || req.Username == "" || req.Password == "" || len(req.Roles) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "missing required fields")
+	}
+
+	resp, err := s.h.Register.Handle(ctx, req)
+	if err != nil {
+		metrics.RegisterTotal.WithLabelValues("fail").Inc()
+		return nil, status.Errorf(codes.Internal, "register failed: %v", err)
+	}
+
+	metrics.RegisterTotal.WithLabelValues("ok").Inc()
+	return resp, nil
+}
+
 func enrichContextWithMetadata(ctx context.Context, meta *commonpb.RequestMetadata) context.Context {
 	if meta == nil {
 		return ctx

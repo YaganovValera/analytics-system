@@ -7,6 +7,7 @@ type Handler struct {
 	Validate ValidateTokenHandler
 	Revoke   RevokeTokenHandler
 	Logout   LogoutHandler
+	Register RegisterHandler
 }
 
 func NewHandler(
@@ -15,6 +16,7 @@ func NewHandler(
 	validate ValidateTokenHandler,
 	revoke RevokeTokenHandler,
 	logout LogoutHandler,
+	register RegisterHandler,
 ) Handler {
 	return Handler{
 		Login:    login,
@@ -22,5 +24,6 @@ func NewHandler(
 		Validate: validate,
 		Revoke:   revoke,
 		Logout:   logout,
+		Register: register,
 	}
 }

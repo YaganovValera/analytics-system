@@ -27,6 +27,7 @@ type RefreshToken struct {
 type UserRepository interface {
 	FindByUsername(ctx context.Context, username string) (*User, error)
 	Create(ctx context.Context, user *User) error
+	ExistsByUsername(ctx context.Context, username string) (bool, error)
 }
 
 type TokenRepository interface {

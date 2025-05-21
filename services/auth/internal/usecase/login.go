@@ -71,6 +71,16 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 		return nil, fmt.Errorf("password check timed out")
 	}
 
+	for _, role := range user.Roles {
+		if !jwt.IsValidRole(role) {
+			h.log.WithContext(ctx).Error("invalid user role",
+				zap.String("username", user.Username),
+				zap.String("role", role),
+			)
+			return nil, fmt.Errorf("user has invalid role: %s", role)
+		}
+	}
+
 	access, accessClaims, err := h.signer.Generate(user.ID, user.Roles, jwt.AccessToken)
 	if err != nil {
 		h.log.WithContext(ctx).Error("generate access token failed", zap.Error(err))

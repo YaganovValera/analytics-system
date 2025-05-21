@@ -70,6 +70,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		usecase.NewValidateTokenHandler(jwtSigner),
 		usecase.NewRevokeTokenHandler(tokenRepo, log),
 		usecase.NewLogoutHandler(tokenRepo),
+		usecase.NewRegisterHandler(userRepo, tokenRepo, jwtSigner, log),
 	)
 
 	// === gRPC Server ===

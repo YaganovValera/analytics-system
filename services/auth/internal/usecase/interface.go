@@ -26,3 +26,7 @@ type RevokeTokenHandler interface {
 type LogoutHandler interface {
 	Handle(ctx context.Context, jti string) error
 }
+
+type RegisterHandler interface {
+	Handle(ctx context.Context, req *authpb.RegisterRequest) (*authpb.RegisterResponse, error)
+}

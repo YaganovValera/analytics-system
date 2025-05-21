@@ -1,4 +1,4 @@
--- migrations/postgres/0001_create_auth_tables.up.sql
+-- auth/migrations/postgres/0001_create_auth_tables.up.sql
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS users (

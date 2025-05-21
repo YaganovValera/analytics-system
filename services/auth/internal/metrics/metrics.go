@@ -17,6 +17,7 @@ var (
 	RevokeTotal       *prometheus.CounterVec
 	LogoutTotal       *prometheus.CounterVec
 	IssuedTokens      *prometheus.CounterVec
+	RegisterTotal     *prometheus.CounterVec
 )
 
 func Register(r prometheus.Registerer) {
@@ -33,6 +34,11 @@ func Register(r prometheus.Registerer) {
 		LoginTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "auth", Subsystem: "login", Name: "total",
 			Help: "Total login attempts by status",
+		}, []string{"status"})
+
+		RegisterTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "auth", Subsystem: "register", Name: "total",
+			Help: "Total user registrations by status",
 		}, []string{"status"})
 
 		RefreshTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -62,7 +68,7 @@ func Register(r prometheus.Registerer) {
 
 		collectors := []prometheus.Collector{
 			GRPCRequestsTotal, LoginTotal, RefreshTotal, ValidateTotal,
-			RevokeTotal, LogoutTotal, IssuedTokens,
+			RevokeTotal, LogoutTotal, IssuedTokens, RegisterTotal,
 		}
 		for _, c := range collectors {
 			_ = r.Register(c)
