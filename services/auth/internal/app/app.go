@@ -11,8 +11,11 @@ import (
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
+
 	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
+
 	"github.com/YaganovValera/analytics-system/services/auth/internal/config"
+	"github.com/YaganovValera/analytics-system/services/auth/internal/interceptor"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
 	postgres "github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
@@ -74,7 +77,11 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	)
 
 	// === gRPC Server ===
-	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.UnaryInterceptor(interceptor.UnaryJWTInterceptor(jwtSigner)),
+	)
+
 	authpb.RegisterAuthServiceServer(grpcServer, grpcTransport.NewServer(h, jwtSigner))
 
 	grpcAddr := fmt.Sprintf(":%d", cfg.HTTP.Port+1)

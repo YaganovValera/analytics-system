@@ -43,9 +43,28 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 
 	}
 
-	username := strings.ToLower(strings.TrimSpace(req.Username))
+	const (
+		minUsernameLength = 3
+		minPasswordLength = 8
+		maxUsernameLength = 128
+	)
 
-	for _, role := range req.Roles {
+	username := strings.ToLower(strings.TrimSpace(req.Username))
+	password := strings.TrimSpace(req.Password)
+
+	if len(username) < minUsernameLength || len(username) > maxUsernameLength {
+		return nil, status.Errorf(codes.InvalidArgument, "username must be between %d and %d characters", minUsernameLength, maxUsernameLength)
+	}
+	if len(password) < minPasswordLength {
+		return nil, status.Errorf(codes.InvalidArgument, "password must be at least %d characters", minPasswordLength)
+	}
+
+	roles, err := jwt.DeduplicateAndValidateRoles(req.Roles)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid roles: %v", err)
+	}
+
+	for _, role := range roles {
 		if !jwt.IsValidRole(role) {
 			h.log.WithContext(ctx).Error("invalid role", zap.String("role", role))
 			return nil, fmt.Errorf("invalid role: %s", role)
@@ -61,7 +80,7 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		return nil, fmt.Errorf("username already exists")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		h.log.WithContext(ctx).Error("hash password failed", zap.Error(err))
 		return nil, fmt.Errorf("hash password: %w", err)

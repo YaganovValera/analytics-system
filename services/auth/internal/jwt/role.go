@@ -2,6 +2,11 @@
 
 package jwt
 
+import (
+	"fmt"
+	"strings"
+)
+
 type Role string
 
 const (
@@ -17,4 +22,24 @@ func IsValidRole(r string) bool {
 	default:
 		return false
 	}
+}
+
+func DeduplicateAndValidateRoles(raw []string) ([]string, error) {
+	seen := map[string]struct{}{}
+	var clean []string
+
+	for _, r := range raw {
+		role := strings.ToLower(strings.TrimSpace(r))
+		if !IsValidRole(role) {
+			return nil, fmt.Errorf("invalid role: %s", role)
+		}
+		if _, ok := seen[role]; !ok {
+			seen[role] = struct{}{}
+			clean = append(clean, role)
+		}
+	}
+	if len(clean) == 0 {
+		return nil, fmt.Errorf("no valid roles provided")
+	}
+	return clean, nil
 }

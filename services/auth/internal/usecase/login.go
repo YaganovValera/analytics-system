@@ -44,7 +44,20 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 		return nil, status.Error(codes.InvalidArgument, "missing credentials")
 	}
 
+	const (
+		minPasswordLength = 8
+		maxUsernameLength = 128
+	)
+
 	username := strings.ToLower(strings.TrimSpace(req.Username))
+	password := strings.TrimSpace(req.Password)
+
+	if len(username) < 3 || len(username) > maxUsernameLength {
+		return nil, status.Error(codes.InvalidArgument, "username must be between 3 and 128 characters")
+	}
+	if len(password) < minPasswordLength {
+		return nil, status.Errorf(codes.InvalidArgument, "password must be at least %d characters", minPasswordLength)
+	}
 
 	user, err := h.users.FindByUsername(ctx, username)
 	if err != nil {
