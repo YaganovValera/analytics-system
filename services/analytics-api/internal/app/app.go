@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/app/app.go
+// analytics-api/internal/app/app.go
 package app
 
 import (

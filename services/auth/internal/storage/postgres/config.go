@@ -1,4 +1,4 @@
-// internal/storage/postgres/config.go
+// auth/internal/storage/postgres/config.go
 package postgres
 
 import "fmt"

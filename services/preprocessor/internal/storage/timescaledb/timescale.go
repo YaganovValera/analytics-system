@@ -1,6 +1,5 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/timescaledb/timescaledb.go
+// preprocessor/internal/storage/timescaledb/timescaledb.go
 
-// internal/storage/timescaledb/timescaledb.go
 package timescaledb
 
 import (

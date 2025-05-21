@@ -1,4 +1,4 @@
-// internal/storage/timescaledb/config.go
+// analytics-api/internal/storage/timescaledb/config.go
 
 package timescaledb
 

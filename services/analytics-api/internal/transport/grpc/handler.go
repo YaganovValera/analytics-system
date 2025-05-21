@@ -1,4 +1,4 @@
-// internal/transport/grps/handler.go
+// analytics-api/internal/transport/grps/handler.go
 
 package grpc
 

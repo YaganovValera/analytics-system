@@ -1,4 +1,4 @@
-// internal/jwt/config.go
+// auth/internal/jwt/config.go
 
 package jwt
 

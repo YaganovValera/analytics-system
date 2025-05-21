@@ -1,4 +1,4 @@
-// internal/storage/postgres/interface.go
+// auth/internal/storage/postgres/interface.go
 package postgres
 
 import (

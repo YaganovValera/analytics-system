@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator/multisink.go
+// preprocessor/internal/aggregator/multisink.go
 
 package aggregator
 

@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/config/config.go
+// analytics-api/internal/config/config.go
 package config
 
 import (

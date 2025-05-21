@@ -1,4 +1,4 @@
-// internal/jwt/jwt.go
+// auth/internal/jwt/jwt.go
 package jwt
 
 import (

@@ -1,4 +1,4 @@
-# github.com/YaganovValera/analytics-system/services/analytics-api/config/config.yaml
+# analytics-api/config/config.yaml
 
 service_name:    "analytics-api"
 service_version: "v1.0.0"

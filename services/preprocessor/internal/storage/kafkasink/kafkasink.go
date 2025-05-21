@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/storage/kafkasink/kafkasink.go
+// preprocessor/internal/storage/kafkasink/kafkasink.go
 
 package kafkasink
 

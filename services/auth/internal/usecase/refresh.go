@@ -1,4 +1,4 @@
-// internal/usecase/refresh.go
+// auth/internal/usecase/refresh.go
 package usecase
 
 import (

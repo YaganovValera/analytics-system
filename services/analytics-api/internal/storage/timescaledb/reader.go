@@ -1,4 +1,4 @@
-// internal/storage/timescaledb/reader.go
+// analytics-api/internal/storage/timescaledb/reader.go
 package timescaledb
 
 import (

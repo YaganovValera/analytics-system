@@ -1,4 +1,4 @@
--- services/preprocessor/migrations/timescaledb/0001_create_candles.up.sql
+-- preprocessor/migrations/timescaledb/0001_create_candles.up.sql
 
 CREATE TABLE IF NOT EXISTS candles (
   time TIMESTAMPTZ NOT NULL,

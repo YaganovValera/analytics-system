@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/transport/marshaler.go
+// preprocessor/internal/transport/marshaler.go
 
 package transport
 

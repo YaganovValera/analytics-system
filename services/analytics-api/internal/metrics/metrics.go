@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/metrics/metrics.go
+// analytics-api/internal/metrics/metrics.go
 package metrics
 
 import (

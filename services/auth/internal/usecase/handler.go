@@ -1,4 +1,4 @@
-// internal/usecase/handler.go
+// auth/internal/usecase/handler.go
 package usecase
 
 type Handler struct {

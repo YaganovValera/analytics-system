@@ -1,4 +1,4 @@
-// internal/jwt/hs256.go
+// auth/internal/jwt/hs256.go
 package jwt
 
 import (

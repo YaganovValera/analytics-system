@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/metrics/metrics.go
+// preprocessor/internal/metrics/metrics.go
 
 package metrics
 

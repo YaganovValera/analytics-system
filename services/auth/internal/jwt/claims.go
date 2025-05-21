@@ -1,4 +1,4 @@
-// internal/jwt/claims.go
+// auth/internal/jwt/claims.go
 package jwt
 
 import (

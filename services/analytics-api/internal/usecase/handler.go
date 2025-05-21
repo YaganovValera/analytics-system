@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase
+// analytics-api/internal/usecase/handler.go
 package usecase
 
 import (

@@ -1,4 +1,4 @@
-# services/auth/Dockerfile
+# auth/Dockerfile
 # syntax=docker/dockerfile:1
 
 # ====== BUILD STAGE ======

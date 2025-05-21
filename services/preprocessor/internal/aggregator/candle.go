@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator/candle.go
+// preprocessor/internal/aggregator/candle.go
 package aggregator
 
 import (

@@ -1,5 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/cmd/analytics-api/main.go
-// cmd/analytics-api/main.go
+// analytics-api/cmd/analytics-api/main.go
 package main
 
 import (

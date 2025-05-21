@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/analytics-api/internal/storage/kafka/consumer.go
+// analytics-api/internal/storage/kafka/consumer.go
 package kafka
 
 import (

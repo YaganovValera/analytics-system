@@ -1,4 +1,4 @@
-// internal/app/app.go
+// auth/internal/app/app.go
 package app
 
 import (

@@ -1,5 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator/manager.go
-// services/preprocessor/internal/aggregator/manager.go
+// preprocessor/internal/aggregator/manager.go
 package aggregator
 
 import (

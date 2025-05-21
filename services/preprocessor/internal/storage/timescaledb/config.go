@@ -1,4 +1,4 @@
-// services/preprocessor/internal/storage/timescaledb/config.go
+// preprocessor/internal/storage/timescaledb/config.go
 package timescaledb
 
 import "fmt"

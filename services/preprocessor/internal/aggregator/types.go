@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator/type.go
+// preprocessor/internal/aggregator/type.go
 
 package aggregator
 

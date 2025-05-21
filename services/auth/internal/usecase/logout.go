@@ -1,4 +1,4 @@
-// internal/usecase/logout.go
+// auth/internal/usecase/logout.go
 package usecase
 
 import (

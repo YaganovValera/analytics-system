@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/kafka/consumer.go
+// preprocessor/internal/kafka/consumer.go
 
 package kafka
 

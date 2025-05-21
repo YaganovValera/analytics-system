@@ -1,4 +1,4 @@
-// cmd/auth/main.go
+// auth/cmd/auth/main.go
 package main
 
 import (

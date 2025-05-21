@@ -1,4 +1,4 @@
-// internal/transport/converter.go
+// analytics-api/internal/transport/converter.go
 package transport
 
 import (

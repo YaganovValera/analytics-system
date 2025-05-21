@@ -1,4 +1,4 @@
-// internal/transport/grpc/handler.go
+// auth/internal/transport/grpc/handler.go
 package grpc
 
 import (

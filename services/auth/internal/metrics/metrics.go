@@ -1,4 +1,4 @@
-// internal/metrics/metrics.go
+// auth/internal/metrics/metrics.go
 package metrics
 
 import (

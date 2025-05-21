@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/cmd/preprocessor/main.go
+// preprocessor/cmd/preprocessor/main.go
 package main
 
 import (

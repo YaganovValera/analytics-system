@@ -1,35 +1,27 @@
-# services/auth/config/config.yaml
+# auth/config/config.yaml
 
 service_name:    "auth"
 service_version: "v1.0.0"
 
-# ------------------------------------------------------------------------------
 # JWT
-# ------------------------------------------------------------------------------
 jwt:
   access_ttl: "15m"
   refresh_ttl: "168h"
   issuer: "auth-service"
   audience: "analytics-system"
 
-# ------------------------------------------------------------------------------
 # PostgreSQL (TimescaleDB-compatible)
-# ------------------------------------------------------------------------------
 postgres:
   dsn: postgres://user:pass@timescaledb:5432/auth?sslmode=disable
   migrations_dir: "/app/migrations/postgres"
 
-# ------------------------------------------------------------------------------
 # Logging
-# ------------------------------------------------------------------------------
 logging:
   level:    "info"
   dev_mode: false
   format:   "console"
 
-# ------------------------------------------------------------------------------
 # OpenTelemetry
-# ------------------------------------------------------------------------------
 telemetry:
   endpoint: "otel-collector:4317"
   insecure: true
@@ -38,9 +30,7 @@ telemetry:
   service_version: "v1.0.0"
   timeout: "5s"
 
-# ------------------------------------------------------------------------------
 # HTTP server for healthz/metrics
-# ------------------------------------------------------------------------------
 http:
   port: 8084
   read_timeout: "10s"

@@ -1,4 +1,4 @@
-// internal/usecase/revoke.go
+// auth/internal/usecase/revoke.go
 package usecase
 
 import (

@@ -1,4 +1,4 @@
-// services/preprocessor/internal/config/config.go
+// preprocessor/internal/config/config.go
 package config
 
 import (

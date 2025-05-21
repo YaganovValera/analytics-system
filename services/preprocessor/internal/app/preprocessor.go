@@ -1,6 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/app/preprocessor.go
-
-// services/preprocessor/internal/app/preprocessor.go
+// preprocessor/internal/app/preprocessor.go
 package app
 
 import (

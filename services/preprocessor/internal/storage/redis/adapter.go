@@ -1,4 +1,4 @@
-// services/preprocessor/internal/storage/redis/adapter.go
+// preprocessor/internal/storage/redis/adapter.go
 package redis
 
 import (

@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/preprocessor/internal/aggregator/interface.go
+// preprocessor/internal/aggregator/interface.go
 package aggregator
 
 import (
