@@ -4,25 +4,30 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/httpserver"
 	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/YaganovValera/analytics-system/common/serviceid"
 	"github.com/YaganovValera/analytics-system/common/telemetry"
-
+	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/config"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
-	"github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
-	"github.com/YaganovValera/analytics-system/services/auth/internal/transport/grpc"
+	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
+	postgres "github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
+	grpcTransport "github.com/YaganovValera/analytics-system/services/auth/internal/transport/grpc"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/usecase"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	serviceid.InitServiceName(cfg.ServiceName)
+	metrics.Register(nil)
 
 	// === Telemetry ===
 	cfg.Telemetry.ServiceName = cfg.ServiceName
@@ -41,7 +46,10 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("postgres connect: %w", err)
 	}
-	defer db.Close()
+	defer shutdownSafe(ctx, "postgres", func(ctx context.Context) error {
+		db.Close()
+		return nil
+	}, log)
 
 	// === JWT Signer/Verifier ===
 	accessTTL, _ := time.ParseDuration(cfg.JWT.AccessTTL)
@@ -56,17 +64,26 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	tokenRepo := postgres.NewTokenRepo(db)
 
 	// === Usecases ===
-	login := usecase.NewLoginHandler(userRepo, tokenRepo, jwtSigner, log)
-	refresh := usecase.NewRefreshTokenHandler(tokenRepo, jwtSigner, jwtSigner, log)
-	validate := usecase.NewValidateTokenHandler(jwtSigner)
-	revoke := usecase.NewRevokeTokenHandler(tokenRepo, log)
-	logout := usecase.NewLogoutHandler(tokenRepo)
+	h := usecase.NewHandler(
+		usecase.NewLoginHandler(userRepo, tokenRepo, jwtSigner, log),
+		usecase.NewRefreshTokenHandler(tokenRepo, jwtSigner, jwtSigner, log),
+		usecase.NewValidateTokenHandler(jwtSigner),
+		usecase.NewRevokeTokenHandler(tokenRepo, log),
+		usecase.NewLogoutHandler(tokenRepo),
+	)
 
 	// === gRPC Server ===
-	grpcServer := grpc.NewServer(login, validate, refresh, revoke, logout, log)
-	grpcSrv := grpc.NewGRPCServer(cfg.HTTP.Port+1, grpcServer, log)
+	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	authpb.RegisterAuthServiceServer(grpcServer, grpcTransport.NewServer(h))
 
-	// === HTTP server (healthz, readyz, metrics) ===
+	grpcAddr := fmt.Sprintf(":%d", cfg.HTTP.Port+1)
+	grpcLis, err := net.Listen("tcp", grpcAddr)
+
+	if err != nil {
+		return fmt.Errorf("grpc listen: %w", err)
+	}
+
+	// === HTTP Server ===
 	readiness := func() error {
 		ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
@@ -81,11 +98,11 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf("httpserver init: %w", err)
 	}
 
-	// === Run both
 	log.WithContext(ctx).Info("auth: starting services")
 	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error { return grpcServer.Serve(grpcLis) })
 	g.Go(func() error { return httpSrv.Run(ctx) })
-	g.Go(func() error { return grpcSrv.Serve(ctx) })
 
 	if err := g.Wait(); err != nil {
 		if ctx.Err() == context.Canceled {

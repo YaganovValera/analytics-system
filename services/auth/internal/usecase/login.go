@@ -45,9 +45,24 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 		return nil, fmt.Errorf("user not found")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		h.log.WithContext(ctx).Warn("invalid password", zap.Error(err))
-		return nil, fmt.Errorf("invalid credentials")
+	timeout := 200 * time.Millisecond
+	ctxHash, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	hashCh := make(chan error, 1)
+	go func() {
+		hashCh <- bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
+	}()
+
+	select {
+	case err := <-hashCh:
+		if err != nil {
+			h.log.WithContext(ctx).Warn("invalid password", zap.Error(err))
+			return nil, fmt.Errorf("invalid credentials")
+		}
+	case <-ctxHash.Done():
+		h.log.WithContext(ctx).Warn("password hash timeout")
+		return nil, fmt.Errorf("password check timed out")
 	}
 
 	access, accessClaims, err := h.signer.Generate(user.ID, user.Roles, jwt.AccessToken)
@@ -59,7 +74,6 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 		return nil, fmt.Errorf("generate refresh: %w", err)
 	}
 
-	// persist refresh
 	err = h.tokens.Store(ctx, &postgres.RefreshToken{
 		ID:        uuid.NewString(),
 		UserID:    user.ID,
