@@ -75,7 +75,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 
 	// === gRPC Server ===
 	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
-	authpb.RegisterAuthServiceServer(grpcServer, grpcTransport.NewServer(h))
+	authpb.RegisterAuthServiceServer(grpcServer, grpcTransport.NewServer(h, jwtSigner))
 
 	grpcAddr := fmt.Sprintf(":%d", cfg.HTTP.Port+1)
 	grpcLis, err := net.Listen("tcp", grpcAddr)

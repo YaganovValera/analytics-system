@@ -3,8 +3,8 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/backoff"
@@ -13,6 +13,8 @@ import (
 	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
 	"go.opentelemetry.io/otel"
@@ -35,10 +37,13 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 	ctx, span := otel.Tracer("auth/usecase/register").Start(ctx, "Register")
 	defer span.End()
 
-	if req == nil || req.Username == "" || req.Password == "" || len(req.Roles) == 0 {
+	if req == nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" || len(req.Roles) == 0 {
 		metrics.LoginTotal.WithLabelValues("invalid").Inc()
-		return nil, errors.New("missing fields")
+		return nil, status.Error(codes.InvalidArgument, "missing required fields")
+
 	}
+
+	username := strings.ToLower(strings.TrimSpace(req.Username))
 
 	for _, role := range req.Roles {
 		if !jwt.IsValidRole(role) {
@@ -47,7 +52,7 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 		}
 	}
 
-	exists, err := h.users.ExistsByUsername(ctx, req.Username)
+	exists, err := h.users.ExistsByUsername(ctx, username)
 	if err != nil {
 		h.log.WithContext(ctx).Error("check username failed", zap.Error(err))
 		return nil, fmt.Errorf("check username: %w", err)
@@ -65,7 +70,7 @@ func (h *registerHandler) Handle(ctx context.Context, req *authpb.RegisterReques
 	userID := uuid.NewString()
 	user := &postgres.User{
 		ID:           userID,
-		Username:     req.Username,
+		Username:     username,
 		PasswordHash: string(hash),
 		Roles:        req.Roles,
 	}

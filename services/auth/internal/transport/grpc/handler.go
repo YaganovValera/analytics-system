@@ -19,11 +19,12 @@ import (
 
 type Server struct {
 	authpb.UnimplementedAuthServiceServer
-	h usecase.Handler
+	h        usecase.Handler
+	verifier jwt.Verifier
 }
 
-func NewServer(handler usecase.Handler) *Server {
-	return &Server{h: handler}
+func NewServer(handler usecase.Handler, verifier jwt.Verifier) *Server {
+	return &Server{h: handler, verifier: verifier}
 }
 
 func (s *Server) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
@@ -120,7 +121,7 @@ func (s *Server) Logout(ctx context.Context, req *authpb.LogoutRequest) (*authpb
 		return nil, status.Error(codes.InvalidArgument, "missing refresh token")
 	}
 
-	claims, err := jwt.ParseUnverifiedJTI(req.RefreshToken)
+	claims, err := s.verifier.Parse(req.RefreshToken)
 	if err != nil {
 		metrics.LogoutTotal.WithLabelValues("invalid").Inc()
 		return nil, status.Errorf(codes.InvalidArgument, "invalid refresh token: %v", err)

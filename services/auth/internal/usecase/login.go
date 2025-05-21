@@ -3,8 +3,8 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/backoff"
@@ -13,6 +13,8 @@ import (
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -37,15 +39,17 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 	ctx, span := loginTracer.Start(ctx, "Login")
 	defer span.End()
 
-	if req == nil || req.Username == "" || req.Password == "" {
+	if req == nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
 		metrics.LoginTotal.WithLabelValues("invalid").Inc()
-		return nil, errors.New("missing credentials")
+		return nil, status.Error(codes.InvalidArgument, "missing credentials")
 	}
 
-	user, err := h.users.FindByUsername(ctx, req.Username)
+	username := strings.ToLower(strings.TrimSpace(req.Username))
+
+	user, err := h.users.FindByUsername(ctx, username)
 	if err != nil {
 		metrics.LoginTotal.WithLabelValues("fail").Inc()
-		h.log.WithContext(ctx).Warn("user not found", zap.String("username", req.Username), zap.Error(err))
+		h.log.WithContext(ctx).Warn("user not found", zap.String("username", username), zap.Error(err))
 		return nil, fmt.Errorf("user not found")
 	}
 
