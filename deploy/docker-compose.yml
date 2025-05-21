@@ -126,7 +126,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8086:8086"
     env_file:
       - ../services/market-data-collector/.env
     restart: always

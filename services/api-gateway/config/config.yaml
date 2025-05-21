@@ -1,0 +1,26 @@
+# api-gateway/config/config.yaml
+
+service_name: "api-gateway"
+service_version: "v1.0.0"
+
+logging:
+  level: info
+  dev_mode: false
+  format: console
+
+http:
+  port: 8080
+  read_timeout: "10s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "5s"
+  metrics_path: "/metrics"
+  healthz_path: "/healthz"
+  readyz_path: "/readyz"
+
+telemetry:
+  endpoint: "otel-collector:4317"
+  insecure: true
+  reconnect_period: "5s"
+  timeout: "5s"
+  sampler_ratio: 1.0

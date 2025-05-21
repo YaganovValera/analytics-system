@@ -49,7 +49,7 @@ logging:
 
 #  HTTP/metrics-server (httpserver.Config)
 http:
-  port:              8080
+  port:              8086
   read_timeout:      "10s"
   write_timeout:     "15s"
   idle_timeout:      "60s"
