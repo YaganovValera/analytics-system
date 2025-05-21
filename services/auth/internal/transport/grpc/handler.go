@@ -53,6 +53,8 @@ func (s *Server) RefreshToken(ctx context.Context, req *authpb.RefreshTokenReque
 	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "Refresh")
 	defer span.End()
 
+	metrics.GRPCRequestsTotal.WithLabelValues("RefreshToken").Inc()
+
 	if req == nil || req.RefreshToken == "" {
 		metrics.RefreshTotal.WithLabelValues("invalid").Inc()
 		return nil, status.Error(codes.InvalidArgument, "empty refresh token")
@@ -70,6 +72,8 @@ func (s *Server) RefreshToken(ctx context.Context, req *authpb.RefreshTokenReque
 func (s *Server) ValidateToken(ctx context.Context, req *authpb.ValidateTokenRequest) (*authpb.ValidateTokenResponse, error) {
 	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "ValidateToken")
 	defer span.End()
+
+	metrics.GRPCRequestsTotal.WithLabelValues("ValidateToken").Inc()
 
 	if req == nil || req.Token == "" {
 		metrics.ValidateTotal.WithLabelValues("invalid").Inc()
@@ -89,6 +93,8 @@ func (s *Server) RevokeToken(ctx context.Context, req *authpb.RevokeTokenRequest
 	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "RevokeToken")
 	defer span.End()
 
+	metrics.GRPCRequestsTotal.WithLabelValues("RevokeToken").Inc()
+
 	if req == nil || req.Token == "" {
 		metrics.RevokeTotal.WithLabelValues("invalid").Inc()
 		return nil, status.Error(codes.InvalidArgument, "missing token")
@@ -106,6 +112,8 @@ func (s *Server) RevokeToken(ctx context.Context, req *authpb.RevokeTokenRequest
 func (s *Server) Logout(ctx context.Context, req *authpb.LogoutRequest) (*authpb.LogoutResponse, error) {
 	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "Logout")
 	defer span.End()
+
+	metrics.GRPCRequestsTotal.WithLabelValues("Logout").Inc()
 
 	if req == nil || req.RefreshToken == "" {
 		metrics.LogoutTotal.WithLabelValues("invalid").Inc()
