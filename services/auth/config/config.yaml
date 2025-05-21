@@ -1,0 +1,52 @@
+# services/auth/config/config.yaml
+
+service_name:    "auth"
+service_version: "v1.0.0"
+
+# ------------------------------------------------------------------------------
+# JWT
+# ------------------------------------------------------------------------------
+jwt:
+  secret: "changeme-super-secret-key"  # HMAC SHA256 (HS256)
+  access_ttl: "15m"
+  refresh_ttl: "7d"
+  issuer: "auth-service"
+  audience: "analytics-system"
+
+# ------------------------------------------------------------------------------
+# PostgreSQL (TimescaleDB-compatible)
+# ------------------------------------------------------------------------------
+postgres:
+  dsn: "postgres://user:pass@postgres:5432/auth?sslmode=disable"
+  migrations_dir: "/app/migrations/postgres"
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+logging:
+  level:    "info"
+  dev_mode: false
+  format:   "console"
+
+# ------------------------------------------------------------------------------
+# OpenTelemetry
+# ------------------------------------------------------------------------------
+telemetry:
+  endpoint: "otel-collector:4317"
+  insecure: true
+  reconnect_period: "5s"
+  timeout: "5s"
+  sampler_ratio: 1.0
+
+# ------------------------------------------------------------------------------
+# HTTP server for healthz/metrics
+# ------------------------------------------------------------------------------
+http:
+  port: 8084
+  read_timeout: "10s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "5s"
+  metrics_path: "/metrics"
+  healthz_path: "/healthz"
+  readyz_path: "/readyz"

@@ -4,7 +4,6 @@ syntax = "proto3";
 package market.auth.v1;
 option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth;authpb";
 
-import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "v1/common/common.proto";
 
@@ -65,10 +64,17 @@ message RevokeTokenResponse {
   bool revoked = 1;
 }
 
+message LogoutRequest {
+  string refresh_token = 1;
+}
+message LogoutResponse {
+  bool success = 1;
+}
+
 service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
-  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
   rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
 }

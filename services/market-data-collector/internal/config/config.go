@@ -42,7 +42,6 @@ func Load(path string) (*Config, error) {
 			"logging.level":    "info",
 			"logging.dev_mode": false,
 
-			// HTTP server (порт уникальный!)
 			"http.port":             8080,
 			"http.read_timeout":     "10s",
 			"http.write_timeout":    "15s",
