@@ -3,9 +3,12 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 
 	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
+
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
+	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
 
 	"go.opentelemetry.io/otel"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -27,8 +30,10 @@ func (h *validateHandler) Handle(ctx context.Context, token string) (*authpb.Val
 
 	claims, err := h.verifier.Parse(token)
 	if err != nil {
-		return &authpb.ValidateTokenResponse{Valid: false}, nil
+		metrics.ValidateTotal.WithLabelValues("invalid").Inc()
+		return nil, fmt.Errorf("token invalid: %w", err)
 	}
+	metrics.ValidateTotal.WithLabelValues("ok").Inc()
 
 	return &authpb.ValidateTokenResponse{
 		Valid:     true,

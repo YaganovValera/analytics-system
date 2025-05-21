@@ -30,6 +30,8 @@ func (s *Server) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.L
 	ctx, span := otel.Tracer("auth/grpc").Start(ctx, "Login")
 	defer span.End()
 
+	metrics.GRPCRequestsTotal.WithLabelValues("Login").Inc()
+
 	if req != nil && req.Metadata != nil {
 		ctx = enrichContextWithMetadata(ctx, req.Metadata)
 	}

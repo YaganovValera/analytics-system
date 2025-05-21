@@ -10,12 +10,13 @@ import (
 var (
 	once sync.Once
 
-	LoginTotal    *prometheus.CounterVec
-	RefreshTotal  *prometheus.CounterVec
-	ValidateTotal *prometheus.CounterVec
-	RevokeTotal   *prometheus.CounterVec
-	LogoutTotal   *prometheus.CounterVec
-	IssuedTokens  *prometheus.CounterVec
+	GRPCRequestsTotal *prometheus.CounterVec
+	LoginTotal        *prometheus.CounterVec
+	RefreshTotal      *prometheus.CounterVec
+	ValidateTotal     *prometheus.CounterVec
+	RevokeTotal       *prometheus.CounterVec
+	LogoutTotal       *prometheus.CounterVec
+	IssuedTokens      *prometheus.CounterVec
 )
 
 func Register(r prometheus.Registerer) {
@@ -23,6 +24,11 @@ func Register(r prometheus.Registerer) {
 		if r == nil {
 			r = prometheus.DefaultRegisterer
 		}
+
+		GRPCRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "auth", Subsystem: "grpc", Name: "requests_total",
+			Help: "Total gRPC requests by method",
+		}, []string{"method"})
 
 		LoginTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "auth", Subsystem: "login", Name: "total",
@@ -55,7 +61,7 @@ func Register(r prometheus.Registerer) {
 		}, []string{"type"})
 
 		collectors := []prometheus.Collector{
-			LoginTotal, RefreshTotal, ValidateTotal,
+			GRPCRequestsTotal, LoginTotal, RefreshTotal, ValidateTotal,
 			RevokeTotal, LogoutTotal, IssuedTokens,
 		}
 		for _, c := range collectors {

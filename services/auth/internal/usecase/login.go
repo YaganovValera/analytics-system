@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/YaganovValera/analytics-system/common/backoff"
+	"github.com/YaganovValera/analytics-system/common/logger"
 	authpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/auth"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/jwt"
+	"github.com/YaganovValera/analytics-system/services/auth/internal/metrics"
 	"github.com/YaganovValera/analytics-system/services/auth/internal/storage/postgres"
-	"go.uber.org/zap"
 
-	"github.com/YaganovValera/analytics-system/common/logger"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -36,12 +38,14 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 	defer span.End()
 
 	if req == nil || req.Username == "" || req.Password == "" {
+		metrics.LoginTotal.WithLabelValues("invalid").Inc()
 		return nil, errors.New("missing credentials")
 	}
 
 	user, err := h.users.FindByUsername(ctx, req.Username)
 	if err != nil {
-		h.log.WithContext(ctx).Warn("login failed", zap.Error(err))
+		metrics.LoginTotal.WithLabelValues("fail").Inc()
+		h.log.WithContext(ctx).Warn("user not found", zap.String("username", req.Username), zap.Error(err))
 		return nil, fmt.Errorf("user not found")
 	}
 
@@ -57,34 +61,46 @@ func (h *loginHandler) Handle(ctx context.Context, req *authpb.LoginRequest) (*a
 	select {
 	case err := <-hashCh:
 		if err != nil {
+			metrics.LoginTotal.WithLabelValues("fail").Inc()
 			h.log.WithContext(ctx).Warn("invalid password", zap.Error(err))
 			return nil, fmt.Errorf("invalid credentials")
 		}
 	case <-ctxHash.Done():
+		metrics.LoginTotal.WithLabelValues("fail").Inc()
 		h.log.WithContext(ctx).Warn("password hash timeout")
 		return nil, fmt.Errorf("password check timed out")
 	}
 
 	access, accessClaims, err := h.signer.Generate(user.ID, user.Roles, jwt.AccessToken)
 	if err != nil {
+		h.log.WithContext(ctx).Error("generate access token failed", zap.Error(err))
 		return nil, fmt.Errorf("generate access: %w", err)
 	}
 	refresh, refreshClaims, err := h.signer.Generate(user.ID, user.Roles, jwt.RefreshToken)
 	if err != nil {
+		h.log.WithContext(ctx).Error("generate refresh token failed", zap.Error(err))
 		return nil, fmt.Errorf("generate refresh: %w", err)
 	}
 
-	err = h.tokens.Store(ctx, &postgres.RefreshToken{
-		ID:        uuid.NewString(),
-		UserID:    user.ID,
-		JTI:       refreshClaims.JTI,
-		Token:     refresh,
-		IssuedAt:  refreshClaims.IssuedAt.Time,
-		ExpiresAt: refreshClaims.ExpiresAt.Time,
-	})
+	err = backoff.Execute(ctx, backoff.Config{MaxElapsedTime: 2 * time.Second}, func(ctx context.Context) error {
+		return h.tokens.Store(ctx, &postgres.RefreshToken{
+			ID:        uuid.NewString(),
+			UserID:    user.ID,
+			JTI:       refreshClaims.JTI,
+			Token:     refresh,
+			IssuedAt:  refreshClaims.IssuedAt.Time,
+			ExpiresAt: refreshClaims.ExpiresAt.Time,
+		})
+	}, nil)
 	if err != nil {
+		metrics.LoginTotal.WithLabelValues("fail").Inc()
+		h.log.WithContext(ctx).Error("store refresh token failed", zap.Error(err))
 		return nil, fmt.Errorf("store refresh: %w", err)
 	}
+
+	metrics.IssuedTokens.WithLabelValues("access").Inc()
+	metrics.IssuedTokens.WithLabelValues("refresh").Inc()
+	metrics.LoginTotal.WithLabelValues("ok").Inc()
 
 	return &authpb.LoginResponse{
 		AccessToken:  access,
