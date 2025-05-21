@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/cmd/collector/main.go
+// market-data-collector/cmd/collector/main.go
 package main
 
 import (

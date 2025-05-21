@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/transport/binance/metrics.go
+// market-data-collector/internal/transport/binance/metrics.go
 package binance
 
 import (

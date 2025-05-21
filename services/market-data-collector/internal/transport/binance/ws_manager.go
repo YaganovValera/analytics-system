@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/transport/binance/ws_manager.go
+// market-data-collector/internal/transport/binance/ws_manager.go
 
 package binance
 

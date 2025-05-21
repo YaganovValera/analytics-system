@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/processor/depth.go
+// market-data-collector/internal/processor/depth.go
 package processor
 
 import (

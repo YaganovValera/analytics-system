@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/pkg/binance/interface.go
+// market-data-collector/pkg/binance/interface.go
 package binance
 
 import "context"

@@ -1,11 +1,9 @@
-# services/market-data-collector/config/config.yaml
+# market-data-collector/config/config.yaml
 
 service_name:    "market-data-collector"
 service_version: "v1.0.0"
 
-# ------------------------------------------------------------------------------
 #  Binance WebSocket (pkg/binance.Config)
-# ------------------------------------------------------------------------------
 binance:
   ws_url: "wss://stream.binance.com:9443/ws"
   streams:
@@ -19,9 +17,7 @@ binance:
     max_interval:     "30s"
     max_elapsed_time: "5m"
 
-# ------------------------------------------------------------------------------
 #  Kafka Producer (KafkaConfig)
-# ------------------------------------------------------------------------------
 kafka:
   brokers:
     - "kafka:9092"
@@ -37,9 +33,7 @@ kafka:
   raw_topic:         "marketdata.raw"
   orderbook_topic:   "marketdata.orderbook"
 
-# ------------------------------------------------------------------------------
 #  OpenTelemetry (telemetry.Config)
-# ------------------------------------------------------------------------------
 telemetry:
   endpoint: "otel-collector:4317"
   insecure: true
@@ -47,17 +41,13 @@ telemetry:
   service_version: "v1.0.0"
   # остальные параметры (reconnect_period, timeout, sampler_ratio) берутся из defaults
 
-# ------------------------------------------------------------------------------
 #  Logging (logger.Config)
-# ------------------------------------------------------------------------------
 logging:
   level:    "info"
   dev_mode: false
   # format — по умолчанию "console"
 
-# ------------------------------------------------------------------------------
 #  HTTP/metrics-server (httpserver.Config)
-# ------------------------------------------------------------------------------
 http:
   port:              8080
   read_timeout:      "10s"

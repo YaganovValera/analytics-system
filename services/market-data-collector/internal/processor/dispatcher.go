@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/processor/dispatcher.go
+// market-data-collector/internal/processor/dispatcher.go
 package processor
 
 import (

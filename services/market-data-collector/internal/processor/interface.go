@@ -1,4 +1,4 @@
-// github.com/YaganovValera/analytics-system/services/market-data-collector/internal/processor/interface.go
+// market-data-collector/internal/processor/interface.go
 package processor
 
 import (
