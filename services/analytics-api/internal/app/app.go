@@ -19,6 +19,7 @@ import (
 	"github.com/YaganovValera/analytics-system/services/analytics-api/internal/usecase"
 
 	analyticspb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/analytics"
+	commonpb "github.com/YaganovValera/analytics-system/proto/gen/go/v1/common"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -62,9 +63,16 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	grpcServer := grpcstd.NewServer(
 		grpcstd.StatsHandler(otelgrpc.NewServerHandler()),
 	)
+
 	analyticspb.RegisterAnalyticsServiceServer(grpcServer,
 		grpc.NewServer(getHandler, streamHandler, subscribeHandler))
 
+	// === CommonService — ListSymbols ===
+	getSymbolsHandler := usecase.NewGetSymbolsHandler(db)
+	commonServer := grpc.NewCommonServer(getSymbolsHandler)
+	commonpb.RegisterCommonServiceServer(grpcServer, commonServer)
+
+	// === gRPC Listen ===
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.HTTP.Port+1))
 	if err != nil {
 		return fmt.Errorf("listen grpc: %w", err)

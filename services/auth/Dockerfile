@@ -13,11 +13,12 @@ COPY go.work go.work.sum ./
 
 COPY common/go.mod common/go.sum ./common/
 COPY proto/go.mod proto/go.sum ./proto/
-COPY services/auth/go.mod services/auth/go.sum ./services/auth/
+COPY services/query-service/go.mod services/query-service/go.sum ./services/query-service/
 COPY services/analytics-api/go.mod services/analytics-api/go.sum ./services/analytics-api/
+COPY services/api-gateway/go.mod services/api-gateway/go.sum ./services/api-gateway/
+COPY services/auth/go.mod services/auth/go.sum ./services/auth/
 COPY services/preprocessor/go.mod services/preprocessor/go.sum ./services/preprocessor/
 COPY services/market-data-collector/go.mod services/market-data-collector/go.sum ./services/market-data-collector/
-COPY services/api-gateway/go.mod services/api-gateway/go.sum ./services/api-gateway/
 
 # 2. Синхронизировать зависимости
 RUN go work sync
@@ -46,7 +47,7 @@ COPY --from=builder /app/services/auth/migrations/postgres ./migrations/postgres
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-EXPOSE 8084
+EXPOSE 8084 8085
 
 # 7. Точка входа
 ENTRYPOINT ["./auth", "--config", "config/config.yaml"]

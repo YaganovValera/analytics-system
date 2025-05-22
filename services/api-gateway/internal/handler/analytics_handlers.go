@@ -3,6 +3,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/YaganovValera/analytics-system/common/interval"
@@ -54,4 +55,35 @@ func (h *Handler) GetCandles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, resp)
+}
+
+func (h *Handler) GetSymbols(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	pageSize := int32(100)
+	if v := r.URL.Query().Get("page_size"); v != "" {
+		if ps, err := strconv.Atoi(v); err == nil && ps > 0 {
+			pageSize = int32(ps)
+		}
+	}
+	pageToken := r.URL.Query().Get("page_token")
+
+	resp, err := h.Common.ListSymbols(ctx, &commonpb.ListSymbolsRequest{
+		Pagination: &commonpb.Pagination{
+			PageSize:  pageSize,
+			PageToken: pageToken,
+		},
+	})
+	if err != nil {
+		response.InternalError(w, "failed to fetch symbols")
+		return
+	}
+
+	response.JSON(w, struct {
+		Symbols       []string `json:"symbols"`
+		NextPageToken string   `json:"next_page_token,omitempty"`
+	}{
+		Symbols:       resp.Symbols,
+		NextPageToken: resp.NextPageToken,
+	})
 }

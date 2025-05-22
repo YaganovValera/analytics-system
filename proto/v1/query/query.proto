@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package market.query.v1;
+option go_package = "github.com/YaganovValera/analytics-system/proto/gen/go/v1/query;querypb";
+
+import "v1/common/common.proto";
+
+message ExecuteSQLRequest {
+  string query = 1;                                 // SQL-запрос (только SELECT)
+  map<string, string> parameters = 2;               // Параметры подстановки
+  market.common.v1.RequestMetadata metadata = 3;    // Обогащение логов/трейсов
+}
+
+message ExecuteSQLResponse {
+  repeated string columns = 1;  // Названия колонок результата
+  repeated Row rows = 2;        // Значения строк
+}
+
+message Row {
+  repeated string values = 1;   // Все значения как строки
+}
+
+service QueryService {
+  // Выполняет кастомный SELECT-запрос с параметрами
+  rpc ExecuteSQL(ExecuteSQLRequest) returns (ExecuteSQLResponse);
+}

@@ -1,16 +1,15 @@
-# services/analytics-api/Dockerfile
+# query-service
 # syntax=docker/dockerfile:1
 
 # ====== BUILD STAGE ======
 FROM golang:1.23-alpine AS builder
 
 RUN apk add --no-cache git
+
 WORKDIR /app
 
-# 1) Copy workspace
+# 1. Workspace и go.mod всех сервисов
 COPY go.work go.work.sum ./
-
-# 2) Copy all go.mod/go.sum
 COPY common/go.mod common/go.sum ./common/
 COPY proto/go.mod proto/go.sum ./proto/
 COPY services/query-service/go.mod services/query-service/go.sum ./services/query-service/
@@ -20,30 +19,33 @@ COPY services/auth/go.mod services/auth/go.sum ./services/auth/
 COPY services/preprocessor/go.mod services/preprocessor/go.sum ./services/preprocessor/
 COPY services/market-data-collector/go.mod services/market-data-collector/go.sum ./services/market-data-collector/
 
-# 3) Sync modules
+# 2. Синхронизация workspace
 RUN go work sync
 
-# 4) Copy source
+# 3. Копируем исходники
 COPY . .
-WORKDIR /app/services/analytics-api
 
-# 5) Build static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/analytics-api ./cmd/analytics-api
+WORKDIR /app/services/query-service
+
+# 4. Сборка бинарника
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/query-service ./cmd/query-service
 
 # ====== RUNTIME STAGE ======
 FROM alpine:3.18 AS runner
+
 RUN apk add --no-cache ca-certificates
+
 WORKDIR /app
 
-# 6) Copy binary and config
-COPY --from=builder /app/analytics-api .
-COPY --from=builder /app/services/analytics-api/config ./config
+# 5. Копируем бинарник и конфиги
+COPY --from=builder /app/query-service .
+COPY --from=builder /app/services/query-service/config ./config
 
-# 7) Drop privileges
+# 6. Drop privileges
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-EXPOSE 8082 8083
+EXPOSE 8087 8088
 
-# 8) Entrypoint
-ENTRYPOINT ["./analytics-api", "--config", "config/config.yaml"]
+# 7. Entrypoint
+ENTRYPOINT ["./query-service", "--config", "config/config.yaml"]

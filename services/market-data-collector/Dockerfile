@@ -14,6 +14,7 @@ COPY go.work go.work.sum ./
 # 2) Copy go.mod/go.sum for every module referenced in go.work
 COPY common/go.mod common/go.sum ./common/
 COPY proto/go.mod proto/go.sum ./proto/
+COPY services/query-service/go.mod services/query-service/go.sum ./services/query-service/
 COPY services/analytics-api/go.mod services/analytics-api/go.sum ./services/analytics-api/
 COPY services/api-gateway/go.mod services/api-gateway/go.sum ./services/api-gateway/
 COPY services/auth/go.mod services/auth/go.sum ./services/auth/

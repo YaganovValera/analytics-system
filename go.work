@@ -8,4 +8,5 @@ use (
     ./services/auth
     ./services/market-data-collector
     ./services/preprocessor
+    ./services/query-service
 )

@@ -1,0 +1,28 @@
+service_name: "query-service"
+service_version: "v1.0.0"
+
+logging:
+  level: "info"
+  dev_mode: false
+
+telemetry:
+  endpoint: "otel-collector:4317"
+  insecure: true
+  reconnect_period: "5s"
+  timeout: "5s"
+  sampler_ratio: 1.0
+  service_name: "query-service"
+  service_version: "v1.0.0"
+
+http:
+  port: 8087
+  read_timeout: "10s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "5s"
+  metrics_path: "/metrics"
+  healthz_path: "/healthz"
+  readyz_path: "/readyz"
+
+timescaledb:
+  dsn: "postgres://user:pass@timescaledb:5432/analytics?sslmode=disable"

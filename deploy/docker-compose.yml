@@ -213,3 +213,25 @@ services:
     restart: always
     networks:
       - backend
+
+  query-service:
+    build:
+      context: ../
+      dockerfile: services/query-service/Dockerfile
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8087:8087"  # HTTP server (metrics, healthz, readyz)
+      - "8088:8088"  # gRPC server (по convention: +1 от HTTP)
+    env_file:
+      - ../services/query-service/.env
+    restart: always
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8087/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+

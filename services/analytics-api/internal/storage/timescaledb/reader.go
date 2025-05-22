@@ -23,6 +23,7 @@ import (
 type Repository interface {
 	QueryCandles(ctx context.Context, symbol string, interval string, start, end time.Time, page *commonpb.Pagination) ([]*analyticspb.Candle, string, error)
 	Ping(ctx context.Context) error
+	ListSymbols(ctx context.Context, page *commonpb.Pagination) ([]string, string, error)
 	Close()
 }
 
@@ -126,6 +127,55 @@ func (r *timescaleRepo) QueryCandles(ctx context.Context, symbol, iv string, sta
 	}
 
 	return result, nextToken, nil
+}
+
+func (r *timescaleRepo) ListSymbols(ctx context.Context, page *commonpb.Pagination) ([]string, string, error) {
+	ctx, span := otel.Tracer("storage/timescaledb").Start(ctx, "ListSymbols")
+	defer span.End()
+
+	const defaultPageSize = 100
+	pageSize := int32(defaultPageSize)
+	if page != nil && page.PageSize > 0 {
+		pageSize = page.PageSize
+	}
+
+	query := `SELECT DISTINCT symbol FROM candles`
+	var args []any
+
+	if page != nil && page.PageToken != "" {
+		query += ` WHERE symbol > $1`
+		args = append(args, page.PageToken)
+	}
+
+	query += ` ORDER BY symbol ASC LIMIT $2`
+	args = append(args, pageSize+1) // +1 для проверки, есть ли ещё
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		span.RecordError(err)
+		return nil, "", fmt.Errorf("query symbols: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	var nextToken string
+
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			span.RecordError(err)
+			return nil, "", fmt.Errorf("scan symbol: %w", err)
+		}
+		result = append(result, symbol)
+	}
+
+	// Если выбрали больше, чем pageSize — есть следующая страница
+	if int32(len(result)) > pageSize {
+		nextToken = result[pageSize]
+		result = result[:pageSize]
+	}
+
+	return result, nextToken, rows.Err()
 }
 
 // Ping проверяет доступность TimescaleDB.

@@ -14,6 +14,9 @@ import (
 
 	analyticsclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/analytics"
 	authclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/auth"
+	commonclient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/common"
+	marketdataсlient "github.com/YaganovValera/analytics-system/services/api-gateway/internal/client/marketdata"
+
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/config"
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/handler"
 	"github.com/YaganovValera/analytics-system/services/api-gateway/internal/middleware"
@@ -52,8 +55,23 @@ func Run(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
 	defer shutdownSafe(ctx, "analytics-grpc", analyticsConn.Close, log)
 	analyticsClient := analyticsclient.New(analyticsConn)
 
+	commonConn, err := grpc.NewClient("common-service:8086", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("common grpc dial: %w", err)
+	}
+	defer shutdownSafe(ctx, "common-grpc", commonConn.Close, log)
+	commonClient := commonclient.New(commonConn)
+
+	mdConn, err := grpc.NewClient("marketdata-service:8087", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("marketdata grpc dial: %w", err)
+	}
+	defer shutdownSafe(ctx, "marketdata-grpc", mdConn.Close, log)
+
+	mdClient := marketdataсlient.New(mdConn)
+
 	// === HTTP handlers and middleware ===
-	h := handler.NewHandler(authClient, analyticsClient)
+	h := handler.NewHandler(authClient, analyticsClient, commonClient, mdClient)
 	m := transport.NewMiddleware(authClient)
 
 	extraRoutes := map[string]http.Handler{
